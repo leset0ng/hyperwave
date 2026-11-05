@@ -1,3 +1,5 @@
+pub mod artwork;
+
 use rustfft::{num_complex::Complex32, Fft, FftPlanner};
 use std::sync::Arc;
 
