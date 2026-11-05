@@ -1,6 +1,6 @@
 # Hyperwave
 
-将 HyperOS 音乐超级岛右侧的预制动画替换为音频驱动的六柱波形。
+将 HyperOS 音乐超级岛右侧的预制动画替换为音频驱动波形，可在设置页选择 iOS 六柱外观或保留 HyperOS 原生五柱外观。
 
 这是基于 **libxposed API 102** 的 LSPosed MVP，Android 接入层使用 Java，DSP 使用 Rust。Android 工程直接位于本仓库根目录。
 
@@ -10,7 +10,7 @@ SystemUI / MIUISystemUIPlugin
     → UID-filtered AudioPolicy + AudioRecord
     → 48 kHz mono Float32, 4096-frame blocks
     → JNI / Rust Hann + FFT + six-band response
-    → Canvas geometry + interruptible 80 ms transitions
+    → Canvas geometry (iOS six bars / native HyperOS five bars) + interruptible transitions
 ```
 
 ## Requirements
@@ -30,7 +30,7 @@ cargo test --locked -p hyperwave-dsp
 # macOS, if the default Java is not JDK 21:
 export JAVA_HOME=$(/usr/libexec/java_home -v 21)
 export ANDROID_HOME="$HOME/Library/Android/sdk"
-./gradlew :app:assembleDebug :app:lintDebug
+./gradlew :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
 ```
 
 Gradle 自动运行 `scripts/build-rust.sh`，将 Rust `.so` 放入 APK。可通过 `ANDROID_NDK_HOME` 指定 NDK 路径，通过 `ANDROID_SDK_ROOT` 或 `ANDROID_HOME` 指定 SDK。
@@ -49,8 +49,9 @@ dependencies {
 
 1. 安装 APK，在 LSPosed 中启用 **Hyperwave**，确认推荐作用域 **系统界面 / com.android.systemui** 已勾选。
 2. 重启系统界面或设备，让新模块进入 SystemUI 进程。更新 APK 后也需要重新加载 SystemUI。
-3. 播放音乐并回到桌面。模块接管 `musicWave` / `musicPause` 图标，保留 HyperOS 原有岛容器、封面和点击行为。
-4. 打开 Hyperwave，点击“播放测试音”可运行一分钟测试：依次播放 45、120、320、900、2800、6500 Hz 的低幅合成音。用“停止测试音”提前结束。
+3. 打开 Hyperwave，选择“iOS”或“HyperOS”外观，选择自动保存并实时应用，无需为了切换外观重启系统界面。默认选择 HyperOS。
+4. 播放音乐并回到桌面。模块接管 `musicWave` / `musicPause` 图标，保留 HyperOS 原有岛容器、封面和点击行为。
+5. 点击“播放测试音”可运行一分钟测试：依次播放 45、120、320、900、2800、6500 Hz 的低幅合成音。用“停止测试音”提前结束。
 
 测试播放器使用 MediaSession 和允许捕获的 AudioTrack，不需要音乐文件。测试服务在一分钟后自动结束。
 
@@ -65,14 +66,19 @@ dependencies {
 - 前 2048 样本周期 Hann + 2048 零填充、FFT 尺度与 packed DC/Nyquist、六个实际 bin 分组、幅值求和和非线性映射。
 - 对目标几何做 80 ms ease-out，从当前显示状态接续；暂停使用独立 900 ms 过渡。
 - 视图隐藏、移除和播放源切换时停止采集；失效 session 的更新不会写入新视图状态。
-- 采集失败时播放已还原的 fallback 高度轨迹；正常采集到零值时显示低柱。
-- Hook 原生 `IslandIconViewHolder.getLottieColor(Bitmap)`，读取返回的上下渐变色并原样保留返回值；在主线程同步到六柱，沿用系统封面取色和 60% 不透明度。每根柱各自铺满上下渐变，颜色更新不重启音频采集。
+- 采集失败时播放对应外观的 fallback，正常采集到零值时显示低柱。fallback 退出时保留当前显示几何，接续暂停或实时动画。
+- iOS 外观：六柱、实时 `5S/48` 基础宽、预制 `S/8` 基础宽、动态增粗和圆角像素取整；封面采用 HSP 亮度处理、饱和度、明暗 scrim、模糊，再以柱形遮罩合成。
+- iOS fallback：三种真实轨迹排列、2.66 秒循环、非均匀 keyTimes 的三次 Hermite 插值，第六柱保持最低高度。插值公式经本机公开 QuartzCore presentation 采样核对。
+- HyperOS 外观：五柱、固定柱宽与圆角，继承原 Lottie View/Stub 的尺寸、margin 和 gravity。48 kHz 六个 DSP 频段重采样至五个显示柱；无额外改变 DSP 公式。fallback 使用原生 `music_wave` 的高度和渐变轨迹，暂停采用原生高度与反向渐变。
+- Hook 原生 `IslandIconViewHolder.getLottieColor(Bitmap)`，读取返回的上下渐变色并原样保留返回值；HyperOS 模式保留系统取色及 60% 不透明度，颜色和外观更新均不重启采集。
+- 设置保存在设备保护存储，通过只读 ContentProvider 和 ContentObserver 同步到 SystemUI；读取和封面处理在后台执行。
 
 ## MVP boundaries
 
-- 柱形沿用 HyperOS 原生封面渐变色，取色 Hook 不可用时回退为白色。原系统封面保留；尚未实现 iOS 的封面着色遮罩、blur 和颜色处理。
-- Android `drawRoundRect` 用于圆角，没有声称与 Apple continuous corners 逐像素一致。
-- fallback 使用已还原 VariantA 的五条轨迹，暂用线性关键帧插值，第六柱保持最低高度；不是完整 Core Animation cubic/排列/相位复刻。
+- iOS 外观按当前逆向规格重建。连续圆角使用 macOS QuartzCore 离屏采样轮廓及插值，模糊使用 Android 端的 Gaussian 近似；Apple 的内部工作色域、模糊核和 iOS 真机合成细节未验证，不能声称逐像素一致。
+- iOS fallback cubic 已以本机 macOS 公开 QuartzCore API 的 756 个 presentation 采样点验证；iOS 系统宿主的安装全局相位与实际状态时序仍未验证。
+- HyperOS 实时高度在原生动画范围内响应音频，渐变范围随高度映射到原生端点范围；fallback 保留独立的高度/渐变时间曲线。原生 path 关键帧中的亚像素中心微移未单独复刻。
+- buffering pulse 仍未接入独立的宿主状态。
 - 48 kHz 模式受播放器捕获策略限制。`ALLOW_CAPTURE_BY_SYSTEM` / `ALLOW_CAPTURE_BY_NONE` 的音频可能不能进入这条路径；全零 PCM 无法单独区分真实静音和被策略排除。模块不会据此伪造实时频谱，也不会自动降为全局混音。
 - 更宽松的 privileged capture 被 Android 限制为至多 16 kHz mono PCM16，MVP 不启用这条有高频损失的降级路径。
 - UID 过滤不是 iOS 的 PID tap，同 UID 的媒体流可能被合并。蓝牙、远程投放、受保护内容、多用户和各音乐应用兼容性尚未全面测试。

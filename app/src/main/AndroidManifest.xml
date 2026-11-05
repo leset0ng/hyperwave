@@ -10,6 +10,8 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <provider android:name=".AppearanceProvider" android:authorities="dev.hyperwave.settings"
+            android:exported="true" android:directBootAware="true" />
         <service android:name=".TestAudioService" android:exported="false" android:foregroundServiceType="mediaPlayback" />
     </application>
 </manifest>

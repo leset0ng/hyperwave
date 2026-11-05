@@ -1,7 +1,7 @@
 package dev.hyperwave.ui;
 
-/** Recovered VariantA heights; linear keyframe interpolation is an MVP approximation.
- * The sixth bar stays at its minimum because its reference fallback behavior is unresolved.
+/** Recovered BouncyBars trajectories and default Core Animation scalar cubic.
+ * Hermite tangents were checked against public macOS QuartzCore presentation values.
  */
 final class FallbackFrames {
     private static final float[][] TIMES = {
@@ -15,16 +15,33 @@ final class FallbackFrames {
         {.33f, .589f, .68f, .469f, .937f, .599f, .717f, .52f, .688f, .44f, .73f, .33f},
         {.4f, .24f, .489f, .57f, .421f, .339f, .25f, .72f, .29f, .588f, .501f, .4f}
     };
-    static float[] sample(float cycles) {
-        float phase = cycles - (float) Math.floor(cycles);
-        float[] output = new float[6];
+    private static final int[][] VARIANTS = {
+        {0, 1, 2, 3, 4}, {4, 2, 0, 1, 3}, {3, 0, 1, 2, 4}
+    };
+
+    static void sample(double cycles, int variant, float[] output) {
+        float phase = (float) (cycles - Math.floor(cycles));
         for (int band = 0; band < 5; band++) {
-            float[] times = TIMES[band == 0 ? 0 : 1];
+            int track = VARIANTS[variant][band];
+            float[] times = TIMES[track == 0 ? 0 : 1];
+            float[] values = HEIGHTS[track];
             int i = 0;
             while (i < times.length - 2 && phase > times[i + 1]) i++;
-            float fraction = (phase - times[i]) / (times[i + 1] - times[i]);
-            output[band] = HEIGHTS[band][i] + (HEIGHTS[band][i + 1] - HEIGHTS[band][i]) * fraction;
+            float dt = times[i + 1] - times[i];
+            float t = (phase - times[i]) / dt;
+            float t2 = t * t;
+            float t3 = t2 * t;
+            output[band] = (2 * t3 - 3 * t2 + 1) * values[i]
+                    + (t3 - 2 * t2 + t) * dt * tangent(times, values, i)
+                    + (-2 * t3 + 3 * t2) * values[i + 1]
+                    + (t3 - t2) * dt * tangent(times, values, i + 1);
         }
-        return output;
+        output[5] = 0;
+    }
+
+    private static float tangent(float[] times, float[] values, int index) {
+        int left = Math.max(0, index - 1);
+        int right = Math.min(values.length - 1, index + 1);
+        return (values[right] - values[left]) / (times[right] - times[left]);
     }
 }

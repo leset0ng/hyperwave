@@ -1,6 +1,10 @@
 package dev.hyperwave.module;
 
 import android.content.Context;
+import android.database.ContentObserver;
+import android.database.Cursor;
+import android.graphics.drawable.Icon;
+import android.graphics.drawable.Drawable;
 import android.content.pm.ApplicationInfo;
 import android.graphics.Bitmap;
 import android.graphics.Color;
@@ -13,7 +17,10 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
+import dev.hyperwave.AppearanceSettings;
+import dev.hyperwave.AppearanceSettings.Style;
 import dev.hyperwave.audio.NativeDsp;
+import dev.hyperwave.ui.ArtworkBackdrop;
 import dev.hyperwave.ui.WaveformView;
 import io.github.libxposed.api.XposedModule;
 import java.lang.reflect.Field;
@@ -22,6 +29,8 @@ import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
 import java.util.WeakHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public final class HyperwaveModule extends XposedModule {
     private static final String TAG = "Hyperwave";
@@ -31,6 +40,9 @@ public final class HyperwaveModule extends XposedModule {
     private final Set<ClassLoader> installed = Collections.newSetFromMap(new WeakHashMap<>());
     private final Map<Object, Entry> entries = new WeakHashMap<>();
     private final Handler main = new Handler(Looper.getMainLooper());
+    private final ExecutorService background = Executors.newSingleThreadExecutor();
+    private Style style = Style.HYPEROS;
+    private ContentObserver settingsObserver;
     private boolean nativeReady;
 
     @Override public void onModuleLoaded(ModuleLoadedParam param) {
@@ -78,7 +90,7 @@ public final class HyperwaveModule extends XposedModule {
                 String name = method.getName();
                 if (name.equals("playAnimation") || name.equals("playBigAnimation")) {
                     hook(method).intercept(chain -> {
-                        try { if (replace(chain.getThisObject(), palette)) return null; }
+                        try { if (replace(chain.getThisObject(), palette, name.equals("playBigAnimation"))) return null; }
                         catch (Throwable error) { report("Music replacement failed; keeping original", error); }
                         return chain.proceed();
                     });
@@ -88,7 +100,7 @@ public final class HyperwaveModule extends XposedModule {
                         Object result = chain.proceed();
                         try {
                             Object holder = chain.getThisObject();
-                            if (!replace(holder, palette)) remove(holder);
+                            if (!replace(holder, palette, null)) remove(holder);
                         } catch (Throwable error) { report("Music bind failed", error); }
                         return result;
                     });
@@ -158,7 +170,7 @@ public final class HyperwaveModule extends XposedModule {
         return field;
     }
 
-    private boolean replace(Object holder, Palette palette) throws ReflectiveOperationException {
+    private boolean replace(Object holder, Palette palette, Boolean big) throws ReflectiveOperationException {
         if (Looper.myLooper() != Looper.getMainLooper()) return false;
         Object picInfo = Reflect.field(holder, "picInfo");
         if (picInfo == null) return false;
@@ -173,6 +185,7 @@ public final class HyperwaveModule extends XposedModule {
         FrameLayout container = (FrameLayout) Reflect.field(holder, "iconContainer");
         if (container == null) return false;
         Context context = container.getContext();
+        observeSettings(context);
         int uid;
         try {
             int user = extras.getInt("miui.user.id", Process.myUid() / 100000);
@@ -185,13 +198,15 @@ public final class HyperwaveModule extends XposedModule {
         if (entry == null || entry.container != container) {
             remove(holder);
             WaveformView view = new WaveformView(context);
-            int size = Math.round(22 * context.getResources().getDisplayMetrics().density);
-            FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(size, size, Gravity.CENTER);
-            container.addView(view, params);
-            entry = new Entry(container, view, palette);
+            FrameLayout.LayoutParams nativeParams = nativeLayout(holder, Boolean.TRUE.equals(big), context);
+            container.addView(view, new FrameLayout.LayoutParams(nativeParams));
+            entry = new Entry(container, view, palette, nativeParams);
             entries.put(holder, entry);
             log(Log.INFO, TAG, "replaced " + pic + " for " + source + " uid=" + uid);
         }
+        if (big != null) entry.nativeParams = nativeLayout(holder, big, context);
+        applyAppearance(entry);
+        updateArtwork(entry, extras, source);
         for (int i = 0; i < container.getChildCount(); i++) {
             View child = container.getChildAt(i);
             if (child == entry.view) continue;
@@ -203,9 +218,103 @@ public final class HyperwaveModule extends XposedModule {
         return true;
     }
 
+    private void observeSettings(Context context) {
+        if (settingsObserver != null) return;
+        Context application = context.getApplicationContext();
+        Context target = application == null ? context : application;
+        settingsObserver = new ContentObserver(main) {
+            @Override public void onChange(boolean selfChange) { readSettings(target); }
+        };
+        try {
+            target.getContentResolver().registerContentObserver(AppearanceSettings.URI, false, settingsObserver);
+            readSettings(target);
+        } catch (RuntimeException error) {
+            settingsObserver = null;
+            report("Cannot observe appearance settings", error);
+        }
+    }
+
+    private void readSettings(Context context) {
+        background.execute(() -> {
+            try (Cursor cursor = context.getContentResolver().query(AppearanceSettings.URI, null, null, null, null)) {
+                if (cursor == null || !cursor.moveToFirst()) return;
+                Style next = Style.parse(cursor.getString(cursor.getColumnIndexOrThrow(AppearanceSettings.COLUMN_STYLE)));
+                main.post(() -> {
+                    style = next;
+                    for (Entry entry : entries.values()) applyAppearance(entry);
+                    Log.i(TAG, "appearance applied style=" + next.value);
+                });
+            } catch (RuntimeException error) { report("Cannot read appearance settings; retaining current style", error); }
+        });
+    }
+
+    private void applyAppearance(Entry entry) {
+        entry.view.setStyle(style);
+        FrameLayout.LayoutParams desired;
+        if (style == Style.HYPEROS) desired = new FrameLayout.LayoutParams(entry.nativeParams);
+        else {
+            float density = entry.view.getResources().getDisplayMetrics().density;
+            int size = Math.round((entry.nativeParams.width / density <= 16 ? 16 : 22) * density);
+            desired = new FrameLayout.LayoutParams(size, size, Gravity.CENTER);
+        }
+        ViewGroup.LayoutParams current = entry.view.getLayoutParams();
+        if (!(current instanceof FrameLayout.LayoutParams params) || params.width != desired.width
+                || params.height != desired.height || params.gravity != desired.gravity
+                || params.leftMargin != desired.leftMargin || params.rightMargin != desired.rightMargin)
+            entry.view.setLayoutParams(desired);
+    }
+
+    private FrameLayout.LayoutParams nativeLayout(Object holder, boolean big, Context context) {
+        String[] fields = big ? new String[]{"lottieBigView", "lottieBigViewStub"}
+                : new String[]{"lottieView", "lottieViewStub"};
+        for (String field : fields) {
+            try {
+                Object value = Reflect.field(holder, field);
+                if (value instanceof View view && view.getLayoutParams() instanceof FrameLayout.LayoutParams params
+                        && params.width > 0 && params.height > 0)
+                    return new FrameLayout.LayoutParams(params);
+            } catch (ReflectiveOperationException ignored) { }
+        }
+        String name = big ? "island_big_icon_size" : "island_fix_icon_size";
+        int resource = context.getResources().getIdentifier(name, "dimen", PLUGIN);
+        int size = resource == 0 ? Math.round((big ? 26 : 20) * context.getResources().getDisplayMetrics().density)
+                : context.getResources().getDimensionPixelSize(resource);
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(size, size, Gravity.CENTER);
+        if (!big) params.leftMargin = params.rightMargin = Math.round(context.getResources().getDisplayMetrics().density);
+        return params;
+    }
+
+    private void updateArtwork(Entry entry, Bundle extras, String source) {
+        Bundle pictures = extras.getBundle("miui.focus.pics");
+        Icon icon = pictures == null ? null : pictures.getParcelable("miui_media_album_icon", Icon.class);
+        if (source.equals(entry.source) && icon == entry.artworkIcon) return;
+        entry.source = source;
+        entry.artworkIcon = icon;
+        int token = ++entry.artworkGeneration;
+        entry.view.setArtwork(null);
+        if (icon == null) return;
+        Context context = entry.view.getContext();
+        float density = context.getResources().getDisplayMetrics().density;
+        float logicalSize = entry.nativeParams.width / density <= 16 ? 16 : 22;
+        background.execute(() -> {
+            try {
+                if (token != entry.artworkGeneration) return;
+                Drawable drawable = icon.loadDrawable(context);
+                Bitmap backdrop = drawable == null ? null : ArtworkBackdrop.prepare(drawable, logicalSize);
+                main.post(() -> {
+                    if (token == entry.artworkGeneration) {
+                        entry.view.setArtwork(backdrop);
+                        Log.i(TAG, "artwork applied source=" + source + " ready=" + (backdrop != null));
+                    }
+                });
+            } catch (RuntimeException error) { report("Cannot prepare waveform artwork", error); }
+        });
+    }
+
     private void remove(Object holder) {
         Entry entry = entries.remove(holder);
         if (entry == null) return;
+        entry.artworkGeneration++;
         entry.view.setHostVisible(false);
         entry.container.removeView(entry.view);
     }
@@ -223,10 +332,15 @@ public final class HyperwaveModule extends XposedModule {
         final FrameLayout container;
         final WaveformView view;
         final Palette palette;
-        Entry(FrameLayout container, WaveformView view, Palette palette) {
+        FrameLayout.LayoutParams nativeParams;
+        Icon artworkIcon;
+        String source;
+        volatile int artworkGeneration;
+        Entry(FrameLayout container, WaveformView view, Palette palette, FrameLayout.LayoutParams nativeParams) {
             this.container = container;
             this.view = view;
             this.palette = palette;
+            this.nativeParams = nativeParams;
         }
     }
 }
