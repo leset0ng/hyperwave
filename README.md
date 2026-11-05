@@ -8,8 +8,8 @@
 SystemUI / MIUISystemUIPlugin
     → musicWave / musicPause hooks
     → UID-filtered AudioPolicy + AudioRecord
-    → 48 kHz mono Float32, 4096-frame blocks
-    → JNI / Rust Hann + FFT + six-band response
+    → 48 kHz mono Float32, native direct-buffer read loop, 4096-frame blocks
+    → Rust Hann + FFT + six-band response → JNI six-bar delivery
     → Canvas geometry (iOS six bars / native HyperOS five bars) + interruptible transitions
 ```
 
@@ -63,7 +63,8 @@ dependencies {
 - 两个进程协同放行带专用标记、单个应用 UID、仅 `USAGE_MEDIA`、`RENDER | LOOP_BACK` 的 48 kHz mono Float32 privileged capture；格式例外仅在当前线程的匹配操作内生效，system_server 同时核对调用者为 SystemUI。
 - 仅替换音乐模板的动画，跳过其他事件及投放静态图标。
 - 按播放器 UID 与 `USAGE_MEDIA` 匹配的回环采集，`RENDER | LOOP_BACK` 保留原播放输出。
-- 48 kHz mono Float32 → 4096-frame block → Rust DSP → 六柱。
+- 48 kHz mono Float32 → Rust 直接缓冲区读取循环与 4096-frame 拼块 → Rust DSP → 六柱；PCM 不进入 Java 数组，仅六柱结果通过 JNI 回传。AudioPolicy 配置与 AudioRecord 生命周期仍由 Kotlin 管理，Rust 通过 JNI 调用 AudioRecord 的直接 ByteBuffer 读取接口。
+- 每个采集会话独立持有 PCM 和 FFT 工作区；停止时由 AudioRecord.stop() 解除阻塞读取，读取返回后检查停止状态，再释放录音器并注销策略。
 - 前 2048 样本周期 Hann + 2048 零填充、FFT 尺度与 packed DC/Nyquist、六个实际 bin 分组、幅值求和和非线性映射。
 - 对目标几何做 80 ms ease-out，从当前显示状态接续；暂停使用独立 900 ms 过渡。
 - 视图隐藏、移除和播放源切换时停止采集；失效 session 的更新不会写入新视图状态。
@@ -96,6 +97,8 @@ dependencies {
 `dsp/tests/data/pcm-golden-vectors.json` 来自本仓库 iOS 逆向的七组数值参考输入，保留原始 scope 字段。这些向量是重建的 Accelerate pipeline 结果，不是 Apple 音乐 UI 的动态录制。Rust 测试检查全部 2048 个幅值与六柱值，并额外检查半窗、分段边界、错误长度和非有限输入。
 
 Android lint 的内部 API 反射、动态 native 库加载和单 arm64 支持警告与模块的实现方式有关；lint 没有错误。
+
+native 读取循环的分块、取消与模拟器回归见 `docs/native-capture-validation.md`。
 
 性能优化的数值回归、设备配对计时和复现命令见 `docs/performance-validation.md`。封面亮度与模糊在 Rust 中批量处理，仅在 iOS 外观按需生成；连续圆角复用对称采样和不变路径；生产 DSP 只计算六频段使用的幅值，测试保留完整频谱检查。
 

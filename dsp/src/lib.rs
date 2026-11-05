@@ -1,4 +1,6 @@
 pub mod artwork;
+#[cfg(any(target_os = "android", test))]
+mod capture;
 
 use rustfft::{num_complex::Complex32, Fft, FftPlanner};
 use std::sync::Arc;

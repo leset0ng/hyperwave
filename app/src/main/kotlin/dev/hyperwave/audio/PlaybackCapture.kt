@@ -137,26 +137,18 @@ class PlaybackCapture(
                 throw IllegalStateException("Playback AudioRecord did not start")
             onStarted()
             Log.i(TAG, "capture path uid=$uid mode=${if (privileged) "privileged" else "legacy"}")
-            Log.i(TAG, "capture started uid=$uid 48000Hz mono float32")
-            val pcm = FloatArray(4096)
-            var offset = 0
-            var blocks = 0L
-            while (!stopped) {
-                val count = current.read(pcm, offset, pcm.size - offset, AudioRecord.READ_BLOCKING)
-                if (stopped) break
-                if (count <= 0) throw IllegalStateException("AudioRecord.read=$count")
-                offset += count
-                if (offset != pcm.size) continue
-                val bars = FloatArray(6)
-                if (!NativeDsp.analyze(pcm, bars)) throw IllegalStateException("Rust DSP rejected the PCM block")
-                if (blocks++ == 0L || blocks % 24 == 0L) {
-                    var peak = 0f
-                    for (sample in pcm) peak = maxOf(peak, Math.abs(sample))
-                    Log.i(TAG, "PCM block=$blocks uid=$uid peak=$peak bars=${bars.contentToString()}")
+            Log.i(TAG, "capture started uid=$uid 48000Hz mono float32 reader=native")
+            NativeDsp.capture(current, object : NativeDsp.CaptureCallback {
+                override fun isStopped(): Boolean = stopped
+
+                override fun onBlock(sixBars: FloatArray, peak: Float, block: Long) {
+                    if (stopped) return
+                    if (block == 1L || block % 24 == 0L) {
+                        Log.i(TAG, "PCM block=$block uid=$uid peak=$peak bars=${sixBars.contentToString()}")
+                    }
+                    listener.onBars(sixBars)
                 }
-                listener.onBars(bars)
-                offset = 0
-            }
+            })
         } finally {
             val current = record
             record = null
