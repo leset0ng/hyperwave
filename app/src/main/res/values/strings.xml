@@ -9,4 +9,6 @@
     <string name="appearance_hint">选择后自动保存，已加载的模块会立即应用。</string>
     <string name="height_title">频谱高度</string>
     <string name="height_percent">%1$d%%</string>
+    <string name="hide_launcher_title">隐藏桌面入口</string>
+    <string name="hide_launcher_hint">隐藏后可从 LSPosed 的模块页面打开设置，关闭此开关即可恢复桌面入口。</string>
 </resources>

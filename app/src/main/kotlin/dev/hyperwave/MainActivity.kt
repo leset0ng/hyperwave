@@ -1,6 +1,8 @@
 package dev.hyperwave
 
 import android.app.Activity
+import android.content.ComponentName
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
@@ -11,6 +13,7 @@ import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.SeekBar
+import android.widget.Switch
 import android.widget.TextView
 import dev.hyperwave.AppearanceSettings.Style
 
@@ -91,6 +94,24 @@ class MainActivity : Activity() {
         layout.addView(heightSlider, LinearLayout.LayoutParams(-1, dp(48f)).apply {
             bottomMargin = dp(28f)
         })
+        val launcherComponent = ComponentName(this, "$packageName.Launcher")
+        val hideLauncher = Switch(this)
+        hideLauncher.setText(R.string.hide_launcher_title)
+        hideLauncher.textSize = 16f
+        hideLauncher.minHeight = dp(56f)
+        hideLauncher.setPadding(dp(8f), dp(8f), dp(8f), dp(8f))
+        hideLauncher.isChecked = packageManager.getComponentEnabledSetting(launcherComponent) ==
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+        hideLauncher.setOnCheckedChangeListener { _, hidden ->
+            packageManager.setComponentEnabledSetting(launcherComponent,
+                    if (hidden) PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+                    else PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                    PackageManager.DONT_KILL_APP)
+        }
+        layout.addView(hideLauncher, LinearLayout.LayoutParams(-1, -2))
+        val launcherHint = text(R.string.hide_launcher_hint)
+        launcherHint.setPadding(0, dp(8f), 0, 0)
+        layout.addView(launcherHint)
         setContentView(scroll)
     }
 
