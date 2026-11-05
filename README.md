@@ -2,7 +2,7 @@
 
 将 HyperOS 音乐超级岛右侧的预制动画替换为音频驱动波形，可在设置页选择 iOS 六柱外观或保留 HyperOS 原生五柱外观。
 
-这是基于 **libxposed API 102** 的 LSPosed MVP，Android 接入层使用 Java，DSP 使用 Rust。Android 工程直接位于本仓库根目录。
+这是基于 **libxposed API 102** 的 LSPosed MVP，Android 接入层使用 Kotlin，DSP 使用 Rust。Android 工程直接位于本仓库根目录。
 
 ```text
 SystemUI / MIUISystemUIPlugin

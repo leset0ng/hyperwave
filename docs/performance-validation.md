@@ -38,7 +38,7 @@ Results from 2026-11-05:
 
 ## Paired timings
 
-Device: `hongkong` arm64 emulator, HyperOS `OS4.0.24.0.XFRCNXM`, Android API 37. Debug Java APK, release Rust library. Each measurement uses 8 warmup pairs and 11 measured pairs, alternates old/new order, and reports the median. Artwork measurements include full bitmap processing and result recycling, including pixel transfers and JNI, but exclude Icon loading. Animated-path measurements rebuild six changing paths; unchanged-path measurements reuse identical bounds/radii. Path measurements exclude Canvas rasterization and GPU work.
+Device: `hongkong` arm64 emulator, HyperOS `OS4.0.24.0.XFRCNXM`, Android API 37. Debug Kotlin APK, release Rust library. Each measurement uses 8 warmup pairs and 11 measured pairs, alternates old/new order, and reports the median. Artwork measurements include full bitmap processing and result recycling, including pixel transfers and JNI, but exclude Icon loading. Animated-path measurements rebuild six changing paths; unchanged-path measurements reuse identical bounds/radii. Path measurements exclude Canvas rasterization and GPU work.
 
 | Operation | Reference | Optimized | Speedup |
 | --- | ---: | ---: | ---: |
