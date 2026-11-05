@@ -90,15 +90,62 @@ final class ContinuousCorners {
 
     private ContinuousCorners() {}
 
-    static void build(Path path, RectF bounds, float radius) {
-        path.rewind();
-        float width = bounds.width();
-        float height = bounds.height();
-        if (!(width > 0) || !(height > 0) || !Float.isFinite(width) || !Float.isFinite(height)) return;
-        if (!(radius > 0) || !Float.isFinite(radius)) {
-            path.addRect(bounds, Path.Direction.CW);
-            return;
+    /** One builder per displayed bar retains both its samples and unchanged path. */
+    static final class Builder {
+        private final Path path = new Path();
+        private final float[] edges = new float[STEPS + 2];
+        private float left, top, right, bottom, cachedRadius;
+        private boolean ready;
+
+        Path build(RectF bounds, float radius) {
+            if (ready && same(left, bounds.left) && same(top, bounds.top)
+                    && same(right, bounds.right) && same(bottom, bounds.bottom)
+                    && same(cachedRadius, radius)) return path;
+            left = bounds.left;
+            top = bounds.top;
+            right = bounds.right;
+            bottom = bounds.bottom;
+            cachedRadius = radius;
+            ready = true;
+            path.rewind();
+            float width = bounds.width();
+            float height = bounds.height();
+            if (!(width > 0) || !(height > 0) || !Float.isFinite(width) || !Float.isFinite(height)) return path;
+            if (!(radius > 0) || !Float.isFinite(radius)) {
+                path.addRect(bounds, Path.Direction.CW);
+                return path;
+            }
+            float cap = sampleEdges(width, height, radius, edges);
+            path.moveTo(left + width / 2, top);
+            for (int i = 1; i <= STEPS; i++) {
+                float y = cap * i / STEPS;
+                path.lineTo(left + width * edges[i], top + width * y);
+            }
+            path.lineTo(left + width * edges[STEPS + 1], bottom - width * cap);
+            for (int i = STEPS - 1; i >= 0; i--) {
+                float y = cap * i / STEPS;
+                path.lineTo(left + width * edges[i], bottom - width * y);
+            }
+            for (int i = 1; i <= STEPS; i++) {
+                float y = cap * i / STEPS;
+                path.lineTo(right - width * edges[i], bottom - width * y);
+            }
+            path.lineTo(right - width * edges[STEPS + 1], top + width * cap);
+            for (int i = STEPS - 1; i >= 0; i--) {
+                float y = cap * i / STEPS;
+                path.lineTo(right - width * edges[i], top + width * y);
+            }
+            path.close();
+            return path;
         }
+
+        private static boolean same(float a, float b) {
+            return Float.floatToIntBits(a) == Float.floatToIntBits(b);
+        }
+    }
+
+    // Pure sampling also lets local JVM tests compare against the original interpolation.
+    static float sampleEdges(float width, float height, float radius, float[] output) {
         // Keep the requested radius, including values above width / 2.
         float aspect = height / width;
         float relativeRadius = radius / width;
@@ -107,30 +154,14 @@ final class ContinuousCorners {
         float at = fraction(ASPECTS[ai], ASPECTS[ai + 1], aspect);
         float rt = fraction(RADII[ri], RADII[ri + 1], relativeRadius);
         float cap = Math.min(1, aspect / 2);
-        float left = bounds.left;
-        float right = bounds.right;
-        float top = bounds.top;
-        float bottom = bounds.bottom;
-        path.moveTo(left + width / 2, top);
-        for (int i = 1; i <= STEPS; i++) {
+        for (int i = 0; i <= STEPS; i++) {
             float y = cap * i / STEPS;
-            path.lineTo(left + width * edge(ai, ri, at, rt, y), top + width * y);
+            output[i] = edge(ai, ri, at, rt, y);
         }
-        path.lineTo(left + width * edge(ai, ri, at, rt, cap), bottom - width * cap);
-        for (int i = STEPS - 1; i >= 0; i--) {
-            float y = cap * i / STEPS;
-            path.lineTo(left + width * edge(ai, ri, at, rt, y), bottom - width * y);
-        }
-        for (int i = 1; i <= STEPS; i++) {
-            float y = cap * i / STEPS;
-            path.lineTo(right - width * edge(ai, ri, at, rt, y), bottom - width * y);
-        }
-        path.lineTo(right - width * edge(ai, ri, at, rt, cap), top + width * cap);
-        for (int i = STEPS - 1; i >= 0; i--) {
-            float y = cap * i / STEPS;
-            path.lineTo(right - width * edge(ai, ri, at, rt, y), top + width * y);
-        }
-        path.close();
+        // The original side join used cap directly; cap * STEPS / STEPS can round differently.
+        output[STEPS + 1] = cap * STEPS / STEPS == cap
+                ? output[STEPS] : edge(ai, ri, at, rt, cap);
+        return cap;
     }
 
     private static int lower(float[] grid, float value) {

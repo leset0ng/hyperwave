@@ -9,7 +9,6 @@ import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Matrix;
 import android.graphics.Paint;
-import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.os.Handler;
@@ -30,7 +29,11 @@ public final class WaveformView extends View implements Choreographer.FrameCallb
     private static final PathInterpolator PAUSE_CURVE = new PathInterpolator(.33f, 1, .67f, 1);
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final RectF rect = new RectF();
-    private final Path corners = new Path();
+    private final ContinuousCorners.Builder[] cornerBuilders = {
+            new ContinuousCorners.Builder(), new ContinuousCorners.Builder(),
+            new ContinuousCorners.Builder(), new ContinuousCorners.Builder(),
+            new ContinuousCorners.Builder(), new ContinuousCorners.Builder()
+    };
     private final Matrix shaderMatrix = new Matrix();
     private final Handler main = new Handler(Looper.getMainLooper());
     private final GeometryTransition motion = new GeometryTransition(
@@ -250,8 +253,7 @@ public final class WaveformView extends View implements Choreographer.FrameCallb
                 gradient.setLocalMatrix(shaderMatrix);
             }
             if (ios) {
-                ContinuousCorners.build(corners, rect, radius);
-                canvas.drawPath(corners, paint);
+                canvas.drawPath(cornerBuilders[i].build(rect, radius), paint);
             } else canvas.drawRoundRect(rect, radius, radius, paint);
         }
     }
