@@ -7,6 +7,7 @@
     <string name="appearance_hyperos">HyperOS\n沿用系统柱形与封面渐变</string>
     <string name="appearance_mios">MiOS\nios和hyperos结合体</string>
     <string name="appearance_hint">选择后自动保存，已加载的模块会立即应用。</string>
+    <string name="artwork_flip_title">切歌封面翻转</string>
     <string name="height_title">频谱高度</string>
     <string name="height_percent">%1$d%%</string>
     <string name="hide_launcher_title">隐藏桌面入口</string>

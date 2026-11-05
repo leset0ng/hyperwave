@@ -66,6 +66,18 @@ class MainActivity : Activity() {
         val hint = text(R.string.appearance_hint)
         hint.setPadding(0, dp(8f), 0, dp(28f))
         layout.addView(hint)
+        val artworkFlip = Switch(this)
+        artworkFlip.setText(R.string.artwork_flip_title)
+        artworkFlip.textSize = 16f
+        artworkFlip.minHeight = dp(56f)
+        artworkFlip.setPadding(dp(8f), dp(8f), dp(8f), dp(8f))
+        artworkFlip.isChecked = AppearanceSettings.loadArtworkFlip(this)
+        artworkFlip.setOnCheckedChangeListener { _, enabled ->
+            AppearanceSettings.saveArtworkFlip(this, enabled)
+        }
+        layout.addView(artworkFlip, LinearLayout.LayoutParams(-1, -2).apply {
+            bottomMargin = dp(28f)
+        })
         val heightHeader = LinearLayout(this)
         heightHeader.gravity = Gravity.CENTER_VERTICAL
         val heightLabel = section(R.string.height_title)

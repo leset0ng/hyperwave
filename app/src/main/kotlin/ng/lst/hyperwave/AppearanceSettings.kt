@@ -9,6 +9,8 @@ object AppearanceSettings {
     val URI: Uri = Uri.parse("content://$AUTHORITY/appearance")
     const val COLUMN_STYLE = "style"
     const val COLUMN_HEIGHT_PERCENT = "height_percent"
+    const val COLUMN_ARTWORK_FLIP = "artwork_flip"
+    const val DEFAULT_ARTWORK_FLIP = true
     const val MIN_HEIGHT_PERCENT = 50
     const val MAX_HEIGHT_PERCENT = 200
     const val DEFAULT_HEIGHT_PERCENT = 150
@@ -34,6 +36,18 @@ object AppearanceSettings {
                     .getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
                     .getInt(COLUMN_HEIGHT_PERCENT, DEFAULT_HEIGHT_PERCENT)
                     .coerceIn(MIN_HEIGHT_PERCENT, MAX_HEIGHT_PERCENT)
+
+    fun loadArtworkFlip(context: Context): Boolean =
+            context.createDeviceProtectedStorageContext()
+                    .getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+                    .getBoolean(COLUMN_ARTWORK_FLIP, DEFAULT_ARTWORK_FLIP)
+
+    fun saveArtworkFlip(context: Context, enabled: Boolean) {
+        context.createDeviceProtectedStorageContext()
+                .getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+                .edit().putBoolean(COLUMN_ARTWORK_FLIP, enabled).apply()
+        context.contentResolver.notifyChange(URI, null)
+    }
 
     fun saveHeightPercent(context: Context, percent: Int) {
         context.createDeviceProtectedStorageContext()

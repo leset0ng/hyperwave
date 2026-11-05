@@ -22,16 +22,24 @@ class PerformanceInstrumentation : Instrumentation() {
     private val results = Bundle()
     private var captureArguments: Bundle? = null
     private var nativeReload = false
+    private var artworkFlip = false
 
     override fun onCreate(arguments: Bundle?) {
         super.onCreate(arguments)
         captureArguments = arguments?.takeIf { it.containsKey("capture_policy") }
         nativeReload = arguments?.getString("native_reload") == "true"
+        artworkFlip = arguments?.getString("artwork_flip") == "true"
         start()
     }
 
     override fun onStart() {
         try {
+            if (artworkFlip) {
+                ArtworkFlipDeviceCheck.verify(this)
+                results.putString("checks", "PASS: artwork flip hardware reveal, latest image, host corners, hide/detach lifecycle")
+                finish(Activity.RESULT_OK, results)
+                return
+            }
             if (nativeReload) {
                 NativeReloadCheck.verify(targetContext)
                 results.putString("checks", "PASS: three native reload generations, JNI calls, copy cleanup")

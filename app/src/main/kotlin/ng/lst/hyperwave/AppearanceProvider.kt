@@ -15,9 +15,10 @@ class AppearanceProvider : ContentProvider() {
         require(AppearanceSettings.URI == uri) { "Unknown settings URI" }
         val context = checkNotNull(context)
         val cursor = MatrixCursor(arrayOf(AppearanceSettings.COLUMN_STYLE,
-                AppearanceSettings.COLUMN_HEIGHT_PERCENT), 1)
+                AppearanceSettings.COLUMN_HEIGHT_PERCENT, AppearanceSettings.COLUMN_ARTWORK_FLIP), 1)
         cursor.addRow(arrayOf<Any>(AppearanceSettings.load(context).value,
-                AppearanceSettings.loadHeightPercent(context)))
+                AppearanceSettings.loadHeightPercent(context),
+                if (AppearanceSettings.loadArtworkFlip(context)) 1 else 0))
         cursor.setNotificationUri(context.contentResolver, AppearanceSettings.URI)
         return cursor
     }

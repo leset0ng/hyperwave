@@ -42,6 +42,7 @@ class HyperWaveModule : XposedModule() {
     private val entries = WeakHashMap<Any, Entry>()
     private val main by lazy { Handler(Looper.getMainLooper()) }
     private val hooks = ReloadableHooks(this)
+    private val artworkFlips by lazy { ArtworkFlipHooks(hooks, ::observeSettings, ::report) }
     private var background: ExecutorService? = null
     private val workers = ArrayList<ExecutorService>()
     private var hostLoader: ClassLoader? = null
@@ -97,6 +98,7 @@ class HyperWaveModule : XposedModule() {
     private fun installHost(host: ClassLoader): Boolean {
         hostLoader = host
         return try {
+            artworkFlips.installMetadata(host)
             val factory = Class.forName("com.android.systemui.shared.plugins.PluginInstance\$PluginFactory",
                     false, host)
             val createLoader = factory.getDeclaredMethod("createClassLoader")
@@ -134,6 +136,11 @@ class HyperWaveModule : XposedModule() {
             val holderClass = Class.forName(HOLDER, false, loader)
             val palette = palettes.getOrPut(loader) { Palette() }
             installColorHook(holderClass, palette)
+            try {
+                artworkFlips.install(holderClass)
+            } catch (error: Throwable) {
+                report("Artwork flip hooks unavailable; retaining native artwork", error)
+            }
             var methods = 0
             for (method in holderClass.declaredMethods) {
                 val name = method.name
@@ -154,6 +161,7 @@ class HyperWaveModule : XposedModule() {
                         try {
                             val holder = chain.thisObject ?: error("Hook without a receiver")
                             if (!replace(holder, palette, null)) remove(holder)
+                            artworkFlips.onBound(holder)
                         } catch (error: Throwable) {
                             report("Music bind failed", error)
                         }
@@ -161,14 +169,21 @@ class HyperWaveModule : XposedModule() {
                     }
                 } else if (name == "onHidden" || name == "onDetach") {
                     hooks.install(method, "island.$name") { chain ->
-                        chain.thisObject?.let { setHostVisible(it, false) }
+                        chain.thisObject?.let {
+                            setHostVisible(it, false)
+                            if (name == "onDetach") artworkFlips.remove(it)
+                            else artworkFlips.setVisible(it, false)
+                        }
                         chain.proceed()
                     }
                 } else if (name == "onShow") {
                     hooks.install(method, "island.onShow") { chain ->
                         val result = chain.proceed()
                         try {
-                            chain.thisObject?.let { setHostVisible(it, true) }
+                            chain.thisObject?.let {
+                                setHostVisible(it, true)
+                                artworkFlips.setVisible(it, true)
+                            }
                         } catch (error: Throwable) {
                             report("Music show failed", error)
                         }
@@ -320,11 +335,15 @@ class HyperWaveModule : XposedModule() {
                     val nextHeight = (if (heightColumn >= 0) cursor.getInt(heightColumn)
                             else AppearanceSettings.DEFAULT_HEIGHT_PERCENT)
                             .coerceIn(AppearanceSettings.MIN_HEIGHT_PERCENT, AppearanceSettings.MAX_HEIGHT_PERCENT)
+                    val flipColumn = cursor.getColumnIndex(AppearanceSettings.COLUMN_ARTWORK_FLIP)
+                    val nextFlip = if (flipColumn >= 0) cursor.getInt(flipColumn) != 0
+                            else AppearanceSettings.DEFAULT_ARTWORK_FLIP
                     postUpdate {
                         style = next
                         heightPercent = nextHeight
+                        artworkFlips.setEnabled(nextFlip)
                         for (entry in entries.values) applyAppearance(entry)
-                        Log.i(TAG, "appearance applied style=${next.value} height=$nextHeight%")
+                        Log.i(TAG, "appearance applied style=${next.value} height=$nextHeight% artworkFlip=$nextFlip")
                     }
                 }
             } catch (error: RuntimeException) {
@@ -470,6 +489,7 @@ class HyperWaveModule : XposedModule() {
                 retiredViews.addAll(entries.values.map { it.view })
                 settingsObserver?.let { settingsContext?.contentResolver?.unregisterContentObserver(it) }
                 settingsObserver = null
+                artworkFlips.clear()
                 for (holder in entries.keys.toList()) remove(holder)
                 snapshot
             }
@@ -548,6 +568,8 @@ class HyperWaveModule : XposedModule() {
         state["plugins"] = ArrayList(installed)
         state["style"] = style.value
         state["height"] = heightPercent
+        state["artworkFlip"] = artworkFlips.enabled
+        state["artworkHolders"] = artworkFlips.snapshot()
         val holders = ArrayList<ArrayList<Any>>()
         for ((holder, entry) in entries) {
             val row = ArrayList<Any>()
@@ -566,7 +588,8 @@ class HyperWaveModule : XposedModule() {
         style = Style.parse(state["style"] as? String)
         heightPercent = (state["height"] as? Int ?: AppearanceSettings.DEFAULT_HEIGHT_PERCENT)
                 .coerceIn(AppearanceSettings.MIN_HEIGHT_PERCENT, AppearanceSettings.MAX_HEIGHT_PERCENT)
-        for (value in state["holders"] as? List<*> ?: return) {
+        artworkFlips.setEnabled(state["artworkFlip"] as? Boolean ?: AppearanceSettings.DEFAULT_ARTWORK_FLIP)
+        for (value in state["holders"] as? List<*> ?: emptyList<Any>()) {
             val row = value as? List<*> ?: continue
             val holder = row.getOrNull(0) ?: continue
             try {
@@ -580,6 +603,7 @@ class HyperWaveModule : XposedModule() {
                 report("Cannot restore music island after reload", error)
             }
         }
+        artworkFlips.restore(state["artworkHolders"] as? List<*> ?: emptyList<Any>())
     }
 
     private fun currentApplication(): Context =
