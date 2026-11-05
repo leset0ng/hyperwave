@@ -205,8 +205,8 @@ public final class HyperwaveModule extends XposedModule {
             log(Log.INFO, TAG, "replaced " + pic + " for " + source + " uid=" + uid);
         }
         if (big != null) entry.nativeParams = nativeLayout(holder, big, context);
-        applyAppearance(entry);
         updateArtwork(entry, extras, source);
+        applyAppearance(entry);
         for (int i = 0; i < container.getChildCount(); i++) {
             View child = container.getChildAt(i);
             if (child == entry.view) continue;
@@ -262,6 +262,7 @@ public final class HyperwaveModule extends XposedModule {
                 || params.height != desired.height || params.gravity != desired.gravity
                 || params.leftMargin != desired.leftMargin || params.rightMargin != desired.rightMargin)
             entry.view.setLayoutParams(desired);
+        prepareArtwork(entry);
     }
 
     private FrameLayout.LayoutParams nativeLayout(Object holder, boolean big, Context context) {
@@ -287,27 +288,68 @@ public final class HyperwaveModule extends XposedModule {
     private void updateArtwork(Entry entry, Bundle extras, String source) {
         Bundle pictures = extras.getBundle("miui.focus.pics");
         Icon icon = pictures == null ? null : pictures.getParcelable("miui_media_album_icon", Icon.class);
-        if (source.equals(entry.source) && icon == entry.artworkIcon) return;
-        entry.source = source;
-        entry.artworkIcon = icon;
-        int token = ++entry.artworkGeneration;
-        entry.view.setArtwork(null);
-        if (icon == null) return;
+        if (!source.equals(entry.source) || icon != entry.artworkIcon) {
+            entry.source = source;
+            entry.artworkIcon = icon;
+            entry.artworkGeneration++;
+            entry.preparingArtworkSize = -1;
+            java.util.Arrays.fill(entry.artworkBackdrops, null);
+            java.util.Arrays.fill(entry.artworkPrepared, false);
+            showArtwork(entry, null);
+        }
+    }
+
+    private static void showArtwork(Entry entry, Bitmap backdrop) {
+        if (entry.shownArtwork == backdrop) return;
+        entry.shownArtwork = backdrop;
+        entry.view.setArtwork(backdrop);
+    }
+
+    private void prepareArtwork(Entry entry) {
+        if (style != Style.IOS || entry.artworkIcon == null) {
+            if (entry.preparingArtworkSize != -1) {
+                entry.artworkGeneration++;
+                entry.preparingArtworkSize = -1;
+            }
+            return;
+        }
         Context context = entry.view.getContext();
         float density = context.getResources().getDisplayMetrics().density;
-        float logicalSize = entry.nativeParams.width / density <= 16 ? 16 : 22;
+        int sizeIndex = entry.nativeParams.width / density <= 16 ? 0 : 1;
+        if (entry.artworkPrepared[sizeIndex]) {
+            if (entry.preparingArtworkSize != -1) {
+                entry.artworkGeneration++;
+                entry.preparingArtworkSize = -1;
+            }
+            showArtwork(entry, entry.artworkBackdrops[sizeIndex]);
+            return;
+        }
+        if (entry.preparingArtworkSize == sizeIndex) return;
+        int token = ++entry.artworkGeneration;
+        entry.preparingArtworkSize = sizeIndex;
+        Icon icon = entry.artworkIcon;
+        String source = entry.source;
+        float logicalSize = sizeIndex == 0 ? 16 : 22;
         background.execute(() -> {
             try {
                 if (token != entry.artworkGeneration) return;
                 Drawable drawable = icon.loadDrawable(context);
+                if (token != entry.artworkGeneration) return;
                 Bitmap backdrop = drawable == null ? null : ArtworkBackdrop.prepare(drawable, logicalSize);
                 main.post(() -> {
-                    if (token == entry.artworkGeneration) {
-                        entry.view.setArtwork(backdrop);
-                        Log.i(TAG, "artwork applied source=" + source + " ready=" + (backdrop != null));
-                    }
+                    if (token != entry.artworkGeneration) return;
+                    entry.preparingArtworkSize = -1;
+                    entry.artworkBackdrops[sizeIndex] = backdrop;
+                    entry.artworkPrepared[sizeIndex] = true;
+                    showArtwork(entry, backdrop);
+                    Log.i(TAG, "artwork applied source=" + source + " ready=" + (backdrop != null));
                 });
-            } catch (RuntimeException error) { report("Cannot prepare waveform artwork", error); }
+            } catch (RuntimeException error) {
+                main.post(() -> {
+                    if (token == entry.artworkGeneration) entry.preparingArtworkSize = -1;
+                });
+                report("Cannot prepare waveform artwork", error);
+            }
         });
     }
 
@@ -334,6 +376,10 @@ public final class HyperwaveModule extends XposedModule {
         final Palette palette;
         FrameLayout.LayoutParams nativeParams;
         Icon artworkIcon;
+        final Bitmap[] artworkBackdrops = new Bitmap[2];
+        final boolean[] artworkPrepared = new boolean[2];
+        Bitmap shownArtwork;
+        int preparingArtworkSize = -1;
         String source;
         volatile int artworkGeneration;
         Entry(FrameLayout container, WaveformView view, Palette palette, FrameLayout.LayoutParams nativeParams) {
