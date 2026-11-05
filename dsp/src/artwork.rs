@@ -78,7 +78,7 @@ mod android {
     }
 
     #[no_mangle]
-    pub extern "system" fn Java_ng_lst_hyperwave_audio_NativeDsp_sumArtworkBrightness(
+    pub extern "system" fn Java_io_github_leset0ng_hyperwave_audio_NativeDsp_sumArtworkBrightness(
         env: JNIEnv,
         _class: JClass,
         input: JIntArray,
@@ -99,7 +99,7 @@ mod android {
     }
 
     #[no_mangle]
-    pub extern "system" fn Java_ng_lst_hyperwave_audio_NativeDsp_blurArtwork(
+    pub extern "system" fn Java_io_github_leset0ng_hyperwave_audio_NativeDsp_blurArtwork(
         env: JNIEnv,
         _class: JClass,
         input: JIntArray,

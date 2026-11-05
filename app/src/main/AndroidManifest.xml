@@ -15,7 +15,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity-alias>
-        <provider android:name=".AppearanceProvider" android:authorities="ng.lst.hyperwave.settings"
+        <provider android:name=".AppearanceProvider" android:authorities="io.github.leset0ng.hyperwave.settings"
             android:exported="true" android:directBootAware="true" />
     </application>
 </manifest>

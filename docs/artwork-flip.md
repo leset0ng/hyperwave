@@ -47,7 +47,7 @@ JAVA_HOME=$(/usr/libexec/java_home -v 21) ./gradlew \
 android install --device=emulator-5580 --apks=app/build/outputs/apk/debug/app-debug.apk
 android install --device=emulator-5580 --apks=app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 adb -s emulator-5580 shell am instrument -w -e artwork_flip true \
-  ng.lst.hyperwave.test/ng.lst.hyperwave.ui.PerformanceInstrumentation
+  io.github.leset0ng.hyperwave.test/io.github.leset0ng.hyperwave.ui.PerformanceInstrumentation
 ```
 
 本次验证：

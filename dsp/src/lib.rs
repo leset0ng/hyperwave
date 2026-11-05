@@ -87,7 +87,7 @@ mod android {
     static WORKSPACE: OnceLock<Mutex<Workspace>> = OnceLock::new();
 
     #[no_mangle]
-    pub extern "system" fn Java_ng_lst_hyperwave_audio_NativeDsp_analyze(
+    pub extern "system" fn Java_io_github_leset0ng_hyperwave_audio_NativeDsp_analyze(
         env: JNIEnv,
         _class: JClass,
         input: JFloatArray,

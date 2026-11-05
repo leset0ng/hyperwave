@@ -42,7 +42,7 @@ ANDROID_HOME="$HOME/Library/Android/sdk" \
 android install --device=emulator-5580 --apks=app/build/outputs/apk/debug/app-debug.apk
 android install --device=emulator-5580 --apks=app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 adb -s emulator-5580 shell am instrument -w -e native_reload true \
-  ng.lst.hyperwave.test/ng.lst.hyperwave.ui.PerformanceInstrumentation
+  io.github.leset0ng.hyperwave.test/io.github.leset0ng.hyperwave.ui.PerformanceInstrumentation
 ```
 
 JVM regression tests cover executable/ID matching, atomic handle replacement, removal of obsolete handles, paused callback behavior, admission cleanup on exceptions, and a scoped capture operation whose nested validator must survive a rejected reload request. All 34 JVM tests passed, including the six new hook-reload tests. APK/test-APK assembly and Android lint passed.
