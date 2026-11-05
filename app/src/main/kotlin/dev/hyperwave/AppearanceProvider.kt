@@ -14,8 +14,10 @@ class AppearanceProvider : ContentProvider() {
                        selectionArgs: Array<out String>?, sortOrder: String?): Cursor {
         require(AppearanceSettings.URI == uri) { "Unknown settings URI" }
         val context = checkNotNull(context)
-        val cursor = MatrixCursor(arrayOf(AppearanceSettings.COLUMN_STYLE), 1)
-        cursor.addRow(arrayOf<Any>(AppearanceSettings.load(context).value))
+        val cursor = MatrixCursor(arrayOf(AppearanceSettings.COLUMN_STYLE,
+                AppearanceSettings.COLUMN_HEIGHT_PERCENT), 1)
+        cursor.addRow(arrayOf<Any>(AppearanceSettings.load(context).value,
+                AppearanceSettings.loadHeightPercent(context)))
         cursor.setNotificationUri(context.contentResolver, AppearanceSettings.URI)
         return cursor
     }

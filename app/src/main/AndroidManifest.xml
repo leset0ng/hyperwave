@@ -1,8 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <application android:label="Hyperwave" android:theme="@android:style/Theme.Material.NoActionBar" android:allowBackup="false" android:supportsRtl="true">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
@@ -12,6 +9,5 @@
         </activity>
         <provider android:name=".AppearanceProvider" android:authorities="dev.hyperwave.settings"
             android:exported="true" android:directBootAware="true" />
-        <service android:name=".TestAudioService" android:exported="false" android:foregroundServiceType="mediaPlayback" />
     </application>
 </manifest>

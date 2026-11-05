@@ -38,6 +38,7 @@ class HyperwaveModule : XposedModule() {
     private val main by lazy { Handler(Looper.getMainLooper()) }
     private val background: ExecutorService by lazy { Executors.newSingleThreadExecutor() }
     private var style = Style.HYPEROS
+    private var heightPercent = AppearanceSettings.DEFAULT_HEIGHT_PERCENT
     private var settingsObserver: ContentObserver? = null
     private var nativeReady = false
 
@@ -273,10 +274,15 @@ class HyperwaveModule : XposedModule() {
                     if (!cursor.moveToFirst()) return@execute
                     val next = Style.parse(cursor.getString(
                             cursor.getColumnIndexOrThrow(AppearanceSettings.COLUMN_STYLE)))
+                    val heightColumn = cursor.getColumnIndex(AppearanceSettings.COLUMN_HEIGHT_PERCENT)
+                    val nextHeight = (if (heightColumn >= 0) cursor.getInt(heightColumn)
+                            else AppearanceSettings.DEFAULT_HEIGHT_PERCENT)
+                            .coerceIn(AppearanceSettings.MIN_HEIGHT_PERCENT, AppearanceSettings.MAX_HEIGHT_PERCENT)
                     main.post {
                         style = next
+                        heightPercent = nextHeight
                         for (entry in entries.values) applyAppearance(entry)
-                        Log.i(TAG, "appearance applied style=${next.value}")
+                        Log.i(TAG, "appearance applied style=${next.value} height=$nextHeight%")
                     }
                 }
             } catch (error: RuntimeException) {
@@ -286,7 +292,8 @@ class HyperwaveModule : XposedModule() {
     }
 
     private fun applyAppearance(entry: Entry) {
-        entry.view.setStyle(style)
+        entry.view.setStyle(style, minOf(entry.nativeParams.width, entry.nativeParams.height).toFloat())
+        entry.view.setHeightScale(heightPercent / 100f)
         val desired: FrameLayout.LayoutParams
         if (style == Style.HYPEROS) {
             desired = FrameLayout.LayoutParams(entry.nativeParams)

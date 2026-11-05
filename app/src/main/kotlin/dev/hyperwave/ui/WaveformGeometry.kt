@@ -3,7 +3,7 @@ package dev.hyperwave.ui
 /** Target geometry in physical pixels: height, width, radius, horizontal center. */
 internal object WaveformGeometry {
     fun calculate(ios: Boolean, levels: FloatArray, size: Float, fallback: Boolean,
-                  playing: Boolean, output: FloatArray) {
+                  playing: Boolean, output: FloatArray, nativeSize: Float = size, heightScale: Float = 1f) {
         val base = size * 5f / 48f
         val slot = base * 1.12f
         val pitch = slot + (size - 6 * slot) / 5
@@ -13,7 +13,7 @@ internal object WaveformGeometry {
                 val value = maxOf(0f, minOf(1f, levels[i]))
                 val canned = fallback && i < 5
                 val width = (if (canned) size / 8 else base) * (1 + 0.12f * value)
-                output[offset] = maxOf(base, value * size)
+                output[offset] = maxOf(base, value * nativeSize * 44.718f / 66)
                 output[offset + 1] = width
                 output[offset + 2] = if (canned) width / 2 else Math.round(width / 2).toFloat()
                 output[offset + 3] = i * pitch + slot / 2
@@ -25,11 +25,12 @@ internal object WaveformGeometry {
                 val level = if (fallback) levels[minOf(i, 4)]
                         else levels[left] + (levels[right] - levels[left]) * (position - left)
                 val value = maxOf(0f, minOf(1f, level))
-                output[offset] = if (i == 5) 0f else size / 66 * (if (playing) 10.962f + 55.038f * value else 17.4f)
+                output[offset] = if (i == 5) 0f else size / 66 * (if (playing) 10.962f + 33.756f * value else 17.4f)
                 output[offset + 1] = if (i == 5) 0f else size * 5.4f / 66
                 output[offset + 2] = output[offset + 1] / 2
                 output[offset + 3] = size * (9 + 12 * minOf(i, 4)) / 66
             }
+            if (playing) output[offset] *= heightScale
         }
     }
 }

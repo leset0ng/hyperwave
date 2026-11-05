@@ -58,6 +58,8 @@ class WaveformView(context: Context) : View(context), Choreographer.FrameCallbac
     private var artworkSize = 0
     private var geometryReady = false
     private var style = Style.HYPEROS
+    private var nativeSize = 0f
+    private var heightScale = 1f
 
     init {
         val colors = context.obtainStyledAttributes(intArrayOf(android.R.attr.textColorSecondary))
@@ -68,12 +70,25 @@ class WaveformView(context: Context) : View(context), Choreographer.FrameCallbac
         isFocusable = false
     }
 
-    fun setStyle(next: Style) {
-        if (style == next) return
+    fun setStyle(next: Style, nextNativeSize: Float) {
+        if (style == next && nativeSize == nextNativeSize) return
         val now = SystemClock.uptimeMillis()
         refreshShown(now)
         style = next
+        nativeSize = nextNativeSize
         calculate(if (playing) values else silence, unavailable, geometry)
+        motion.transition(geometry, now, 80L)
+        scheduleFrame()
+        invalidate()
+    }
+
+    fun setHeightScale(next: Float) {
+        if (heightScale == next) return
+        val now = SystemClock.uptimeMillis()
+        refreshShown(now)
+        heightScale = next
+        val levels = if (!playing) silence else if (unavailable) fallbackValues else values
+        calculate(levels, unavailable, geometry)
         motion.transition(geometry, now, 80L)
         scheduleFrame()
         invalidate()
@@ -177,8 +192,9 @@ class WaveformView(context: Context) : View(context), Choreographer.FrameCallbac
     }
 
     private fun calculate(levels: FloatArray, fallback: Boolean, output: FloatArray) {
-        WaveformGeometry.calculate(style == Style.IOS, levels, minOf(width, height).toFloat(),
-                fallback, playing, output)
+        val size = minOf(width, height).toFloat()
+        WaveformGeometry.calculate(style == Style.IOS, levels, size,
+                fallback, playing, output, if (nativeSize > 0f) nativeSize else size, heightScale)
     }
 
     private fun refreshShown(now: Long) {
@@ -235,7 +251,7 @@ class WaveformView(context: Context) : View(context), Choreographer.FrameCallbac
         }
         for (i in 0 until 6) {
             val offset = i * 4
-            val barHeight = motion.shown[offset]
+            val barHeight = minOf(size, motion.shown[offset])
             val barWidth = motion.shown[offset + 1]
             val radius = motion.shown[offset + 2]
             if (barHeight <= 0 || barWidth <= 0) continue
@@ -243,8 +259,9 @@ class WaveformView(context: Context) : View(context), Choreographer.FrameCallbac
             rect.set(x, center - barHeight / 2, x + barWidth, center + barHeight / 2)
             if (!ios && shader != null) {
                 if (playing) {
-                    val level = maxOf(0f, minOf(1f, (barHeight * 66 / size - 10.962f) / 55.038f))
-                    val scale = barHeight / (10.962f + 33.756f * level)
+                    val sourceHeight = motion.shown[offset] / heightScale
+                    val level = maxOf(0f, minOf(1f, (sourceHeight * 66 / size - 10.962f) / 33.756f))
+                    val scale = size / 66 * barHeight / sourceHeight
                     val half = 5.313f + (19.659f - 5.313f) * level
                     val start = if (unavailable && i < 5) nativeGradientStart[i] else -half
                     val end = if (unavailable && i < 5) nativeGradientEnd[i] else half

@@ -49,11 +49,10 @@ dependencies {
 
 1. 安装 APK，在 LSPosed 中启用 **Hyperwave**，确认推荐作用域 **系统界面 / com.android.systemui** 和 **系统框架 / system** 均已勾选。现代模块的系统进程作用域标识为 `system`，不是 `android`。
 2. 首次启用系统框架作用域或更新其 Hook 后，重启设备或模拟器，让新模块进入 system_server 与 SystemUI。仅重启系统界面无法更新 system_server 中的 Hook。
-3. 打开 Hyperwave，选择“iOS”或“HyperOS”外观，选择自动保存并实时应用，无需为了切换外观重启系统界面。默认选择 HyperOS。
+3. 打开 Hyperwave，选择“iOS”或“HyperOS”外观，通过“频谱高度”滑块同时调整两种外观的播放柱高（50%–200%，默认 150%）。设置自动保存并实时应用，无需重启系统界面。默认选择 HyperOS。
 4. 播放音乐并回到桌面。模块接管 `musicWave` / `musicPause` 图标，保留 HyperOS 原有岛容器、封面和点击行为。
-5. 点击“播放测试音”可运行一分钟测试：依次播放 45、120、320、900、2800、6500 Hz 的低幅合成音。用“停止测试音”提前结束。
 
-测试播放器使用 MediaSession 和允许捕获的 AudioTrack，不需要音乐文件。测试服务在一分钟后自动结束。
+应用仅提供外观和高度设置。合成音源位于 `androidTest`，供设备音频捕获回归验证使用。
 
 停用：在 LSPosed 中禁用 Hyperwave 并重启设备或模拟器。卸载应用后也需要重启，才能退出已注入 system_server 与 SystemUI 的代码。
 

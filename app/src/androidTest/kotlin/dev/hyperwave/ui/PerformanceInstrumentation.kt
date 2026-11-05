@@ -2,7 +2,6 @@ package dev.hyperwave.ui
 
 import android.app.Activity
 import android.app.Instrumentation
-import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.graphics.Bitmap
@@ -12,7 +11,6 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
 import dev.hyperwave.audio.NativeDsp
-import dev.hyperwave.TestAudioService
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.Random
@@ -70,16 +68,11 @@ class PerformanceInstrumentation : Instrumentation() {
         val policy = arguments.getString("capture_policy")!!.toInt()
         require(policy in AudioAttributes.ALLOW_CAPTURE_BY_ALL..AudioAttributes.ALLOW_CAPTURE_BY_NONE,
                 "invalid capture policy")
-        val intent = Intent(targetContext, TestAudioService::class.java)
-                .setAction(TestAudioService.PLAY).putExtra("capture_policy", policy)
-                .putExtra("test_frequency", arguments.getString("test_frequency", "0").toDouble())
-        try {
-            targetContext.startForegroundService(intent)
+        CaptureTestSource(targetContext).use { source ->
+            source.start(policy, arguments.getString("test_frequency", "0").toDouble())
             CountDownLatch(1).await(27, TimeUnit.SECONDS)
             results.putString("capture_source", "policy=$policy; inspect SystemUI PCM logs for capture result")
             results.putString("unrelated_process_format_limit", formatLimit)
-        } finally {
-            targetContext.stopService(intent)
         }
     }
 

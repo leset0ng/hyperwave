@@ -6,10 +6,6 @@
     <string name="appearance_ios">iOS\n六柱、连续圆角与封面着色</string>
     <string name="appearance_hyperos">HyperOS\n沿用系统柱形与封面渐变</string>
     <string name="appearance_hint">选择后自动保存，已加载的模块会立即应用。</string>
-    <string name="test_title">测试音</string>
-    <string name="test_hint">依次播放六个频段的低音量合成音，一分钟后自动停止。</string>
-    <string name="test_play">播放测试音</string>
-    <string name="test_stop">停止测试音</string>
-    <string name="dsp_ready">音频计算已就绪</string>
-    <string name="dsp_failed">音频计算加载失败：%1$s</string>
+    <string name="height_title">频谱高度</string>
+    <string name="height_percent">%1$d%%</string>
 </resources>

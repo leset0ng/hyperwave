@@ -5,14 +5,14 @@ import org.junit.Test
 
 class HyperOsFallbackTest {
     @Test
-    fun startsAtRemappedHeightsAndIndependentGradientEndpoints() {
+    fun startsAtNativeHeightsAndIndependentGradientEndpoints() {
         val levels = FloatArray(6)
         val start = FloatArray(5)
         val end = FloatArray(5)
         HyperOsFallback.sample(0L, levels, start, end)
         val geometry = FloatArray(24)
         WaveformGeometry.calculate(false, levels, 66f, true, true, geometry)
-        val expected = floatArrayOf(10.962f, 40.271251f, 66f, 25.675322f, 40.271251f)
+        val expected = floatArrayOf(10.962f, 28.938f, 44.718f, 19.986f, 28.938f)
         val halfGradients = floatArrayOf(5.313f, 11.784f, 19.659f, 7.302f, 11.784f)
         for (i in 0 until 5) {
             assertEquals(expected[i].toDouble(), geometry[i * 4].toDouble(), 0.0001)

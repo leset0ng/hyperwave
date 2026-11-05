@@ -1,23 +1,18 @@
 package dev.hyperwave
 
-import android.Manifest
 import android.app.Activity
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.graphics.Insets
 import android.os.Bundle
-import android.util.Log
+import android.view.Gravity
 import android.view.View
 import android.view.WindowInsets
-import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
 import dev.hyperwave.AppearanceSettings.Style
-import dev.hyperwave.audio.NativeDsp
 
 class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -56,43 +51,34 @@ class MainActivity : Activity() {
         val hint = text(R.string.appearance_hint)
         hint.setPadding(0, dp(8f), 0, dp(28f))
         layout.addView(hint)
-        layout.addView(section(R.string.test_title))
-        val testHint = text(R.string.test_hint)
-        testHint.setPadding(0, dp(8f), 0, dp(16f))
-        layout.addView(testHint)
-        val play = Button(this)
-        play.minHeight = dp(48f)
-        play.setText(R.string.test_play)
-        play.setOnClickListener {
-            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
-                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
-            startForegroundService(Intent(this, TestAudioService::class.java).setAction(TestAudioService.PLAY))
-        }
-        layout.addView(play)
-        val stop = Button(this)
-        stop.setText(R.string.test_stop)
-        stop.minHeight = dp(48f)
-        val stopParams = LinearLayout.LayoutParams(-1, -2)
-        stopParams.topMargin = dp(8f)
-        stop.layoutParams = stopParams
-        stop.setOnClickListener { stopService(Intent(this, TestAudioService::class.java)) }
-        layout.addView(stop)
-        val dsp = TextView(this)
-        dsp.setPadding(0, inset, 0, 0)
-        try {
-            NativeDsp.load(applicationInfo.nativeLibraryDir)
-            val pcm = FloatArray(4096)
-            for (i in pcm.indices) pcm[i] = (0.05 * Math.sin(2 * Math.PI * 440 * i / 48000)).toFloat()
-            val bars = FloatArray(6)
-            if (!NativeDsp.analyze(pcm, bars) || bars[2] <= 0)
-                throw IllegalStateException("440 Hz response missing")
-            dsp.setText(R.string.dsp_ready)
-            Log.i("Hyperwave", "app JNI self-check passed " + bars.contentToString())
-        } catch (error: Throwable) {
-            dsp.text = getString(R.string.dsp_failed, error.message)
-            Log.e("Hyperwave", "app JNI self-check failed", error)
-        }
-        layout.addView(dsp)
+        val heightHeader = LinearLayout(this)
+        heightHeader.gravity = Gravity.CENTER_VERTICAL
+        val heightLabel = section(R.string.height_title)
+        val heightValue = text(R.string.height_title)
+        heightHeader.addView(heightLabel, LinearLayout.LayoutParams(0, -2, 1f))
+        heightHeader.addView(heightValue)
+        layout.addView(heightHeader)
+        val heightSlider = SeekBar(this)
+        heightSlider.id = View.generateViewId()
+        heightLabel.labelFor = heightSlider.id
+        heightSlider.min = AppearanceSettings.MIN_HEIGHT_PERCENT
+        heightSlider.max = AppearanceSettings.MAX_HEIGHT_PERCENT
+        heightSlider.progress = AppearanceSettings.loadHeightPercent(this)
+        heightValue.text = getString(R.string.height_percent, heightSlider.progress)
+        heightSlider.stateDescription = heightValue.text
+        heightSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                heightValue.text = getString(R.string.height_percent, progress)
+                seekBar.stateDescription = heightValue.text
+                if (fromUser) AppearanceSettings.saveHeightPercent(this@MainActivity, progress)
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar) = Unit
+            override fun onStopTrackingTouch(seekBar: SeekBar) = Unit
+        })
+        layout.addView(heightSlider, LinearLayout.LayoutParams(-1, dp(48f)).apply {
+            bottomMargin = dp(28f)
+        })
         setContentView(scroll)
     }
 
