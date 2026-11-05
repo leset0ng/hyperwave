@@ -94,6 +94,8 @@ dependencies {
 
 Android lint 的内部 API 反射、动态 native 库加载和单 arm64 支持警告与模块的实现方式有关；lint 没有错误。
 
+性能优化的数值回归、设备配对计时和复现命令见 `docs/performance-validation.md`。封面亮度与模糊在 Rust 中批量处理，仅在 iOS 外观按需生成；连续圆角复用对称采样和不变路径；生产 DSP 只计算六频段使用的幅值，测试保留完整频谱检查。
+
 ```sh
 adb -s emulator-5580 logcat -s Hyperwave
 adb -s emulator-5580 shell 'su -c "/data/adb/modules/zygisk_lsposed/lspctl status"'
