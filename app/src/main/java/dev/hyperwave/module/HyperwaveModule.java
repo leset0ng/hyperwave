@@ -2,8 +2,10 @@ package dev.hyperwave.module;
 
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.Looper;
 import android.os.Process;
 import android.util.Log;
@@ -28,6 +30,7 @@ public final class HyperwaveModule extends XposedModule {
     private static final String HOLDER = "miui.systemui.dynamicisland.module.IslandIconViewHolder";
     private final Set<ClassLoader> installed = Collections.newSetFromMap(new WeakHashMap<>());
     private final Map<Object, Entry> entries = new WeakHashMap<>();
+    private final Handler main = new Handler(Looper.getMainLooper());
     private boolean nativeReady;
 
     @Override public void onModuleLoaded(ModuleLoadedParam param) {
@@ -68,12 +71,14 @@ public final class HyperwaveModule extends XposedModule {
         if (installed.contains(loader)) return;
         try {
             Class<?> holderClass = Class.forName(HOLDER, false, loader);
+            Palette palette = new Palette();
+            installColorHook(holderClass, palette);
             int methods = 0;
             for (Method method : holderClass.getDeclaredMethods()) {
                 String name = method.getName();
                 if (name.equals("playAnimation") || name.equals("playBigAnimation")) {
                     hook(method).intercept(chain -> {
-                        try { if (replace(chain.getThisObject())) return null; }
+                        try { if (replace(chain.getThisObject(), palette)) return null; }
                         catch (Throwable error) { report("Music replacement failed; keeping original", error); }
                         return chain.proceed();
                     });
@@ -83,7 +88,7 @@ public final class HyperwaveModule extends XposedModule {
                         Object result = chain.proceed();
                         try {
                             Object holder = chain.getThisObject();
-                            if (!replace(holder)) remove(holder);
+                            if (!replace(holder, palette)) remove(holder);
                         } catch (Throwable error) { report("Music bind failed", error); }
                         return result;
                     });
@@ -110,7 +115,50 @@ public final class HyperwaveModule extends XposedModule {
         } catch (Throwable error) { report("Cannot install plugin hooks", error); }
     }
 
-    private boolean replace(Object holder) throws ReflectiveOperationException {
+    private void installColorHook(Class<?> holderClass, Palette palette) {
+        try {
+            Method getColor = holderClass.getDeclaredMethod("getLottieColor", Bitmap.class);
+            Field first = pairField(getColor.getReturnType(), "first", "a");
+            Field second = pairField(getColor.getReturnType(), "second", "b");
+            Field top = holderClass.getDeclaredField("gradientTopColor");
+            Field bottom = holderClass.getDeclaredField("gradientBottomColor");
+            top.setAccessible(true);
+            bottom.setAccessible(true);
+            palette.top = top.getInt(null);
+            palette.bottom = bottom.getInt(null);
+            hook(getColor).intercept(chain -> {
+                Object result = chain.proceed();
+                try {
+                    if (result != null) {
+                        int topColor = ((Number) first.get(result)).intValue();
+                        int bottomColor = ((Number) second.get(result)).intValue();
+                        // HyperOS computes the palette on IO; views are updated on main.
+                        main.post(() -> {
+                            palette.top = topColor;
+                            palette.bottom = bottomColor;
+                            for (Entry entry : entries.values()) {
+                                if (entry.palette == palette) entry.view.setColors(topColor, bottomColor);
+                            }
+                            Log.i(TAG, "native island colors top=" + Integer.toHexString(topColor)
+                                    + " bottom=" + Integer.toHexString(bottomColor));
+                        });
+                    }
+                } catch (Throwable error) { report("Cannot read native island colors", error); }
+                return result;
+            });
+            log(Log.INFO, TAG, "native island color hook installed");
+        } catch (Throwable error) { report("Native island colors unavailable; keeping white bars", error); }
+    }
+
+    private static Field pairField(Class<?> type, String name, String obfuscatedName) throws NoSuchFieldException {
+        Field field;
+        try { field = type.getDeclaredField(name); }
+        catch (NoSuchFieldException ignored) { field = type.getDeclaredField(obfuscatedName); }
+        field.setAccessible(true);
+        return field;
+    }
+
+    private boolean replace(Object holder, Palette palette) throws ReflectiveOperationException {
         if (Looper.myLooper() != Looper.getMainLooper()) return false;
         Object picInfo = Reflect.field(holder, "picInfo");
         if (picInfo == null) return false;
@@ -140,7 +188,7 @@ public final class HyperwaveModule extends XposedModule {
             int size = Math.round(22 * context.getResources().getDisplayMetrics().density);
             FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(size, size, Gravity.CENTER);
             container.addView(view, params);
-            entry = new Entry(container, view);
+            entry = new Entry(container, view, palette);
             entries.put(holder, entry);
             log(Log.INFO, TAG, "replaced " + pic + " for " + source + " uid=" + uid);
         }
@@ -150,7 +198,8 @@ public final class HyperwaveModule extends XposedModule {
             if (child.getVisibility() == View.VISIBLE) child.setVisibility(View.GONE);
         }
         entry.view.setVisibility(View.VISIBLE);
-        entry.view.configure(uid, "musicWave".equals(pic), Color.WHITE);
+        entry.view.setColors(palette.top, palette.bottom);
+        entry.view.configure(uid, "musicWave".equals(pic));
         return true;
     }
 
@@ -165,9 +214,19 @@ public final class HyperwaveModule extends XposedModule {
         log(Log.ERROR, TAG, message + ": " + Log.getStackTraceString(error));
     }
 
+    private static final class Palette {
+        int top = Color.WHITE;
+        int bottom = Color.WHITE;
+    }
+
     private static final class Entry {
         final FrameLayout container;
         final WaveformView view;
-        Entry(FrameLayout container, WaveformView view) { this.container = container; this.view = view; }
+        final Palette palette;
+        Entry(FrameLayout container, WaveformView view, Palette palette) {
+            this.container = container;
+            this.view = view;
+            this.palette = palette;
+        }
     }
 }

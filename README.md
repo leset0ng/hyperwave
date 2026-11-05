@@ -66,10 +66,11 @@ dependencies {
 - 对目标几何做 80 ms ease-out，从当前显示状态接续；暂停使用独立 900 ms 过渡。
 - 视图隐藏、移除和播放源切换时停止采集；失效 session 的更新不会写入新视图状态。
 - 采集失败时播放已还原的 fallback 高度轨迹；正常采集到零值时显示低柱。
+- Hook 原生 `IslandIconViewHolder.getLottieColor(Bitmap)`，读取返回的上下渐变色并原样保留返回值；在主线程同步到六柱，沿用系统封面取色和 60% 不透明度。每根柱各自铺满上下渐变，颜色更新不重启音频采集。
 
 ## MVP boundaries
 
-- 初版柱形为白色。原系统封面保留；尚未实现 iOS 的封面着色遮罩、blur 和颜色处理。
+- 柱形沿用 HyperOS 原生封面渐变色，取色 Hook 不可用时回退为白色。原系统封面保留；尚未实现 iOS 的封面着色遮罩、blur 和颜色处理。
 - Android `drawRoundRect` 用于圆角，没有声称与 Apple continuous corners 逐像素一致。
 - fallback 使用已还原 VariantA 的五条轨迹，暂用线性关键帧插值，第六柱保持最低高度；不是完整 Core Animation cubic/排列/相位复刻。
 - 48 kHz 模式受播放器捕获策略限制。`ALLOW_CAPTURE_BY_SYSTEM` / `ALLOW_CAPTURE_BY_NONE` 的音频可能不能进入这条路径；全零 PCM 无法单独区分真实静音和被策略排除。模块不会据此伪造实时频谱，也不会自动降为全局混音。
@@ -80,6 +81,8 @@ dependencies {
 ## Validation and debugging
 
 已在上述 AVD 实测 API 102 模块加载、native 加载、UID 过滤采集、六个测试频段的非零响应、实际岛内绘图和测试结束后的 AudioPolicy 注销。当前 AVD 已安装并启用模块。实测记录与录屏索引见 `hyperos-re/mvp-validation.md`。
+
+原生取色接入后，`:app:assembleDebug :app:lintDebug` 通过；在同一 AVD 更新模块并重新加载 SystemUI，日志确认取得多组带 `0x99` alpha 的原生颜色返回值，截图确认岛内六柱显示封面渐变色，音频采集和实时波形继续工作。
 
 `dsp/tests/data/pcm-golden-vectors.json` 来自本仓库 iOS 逆向的七组数值参考输入，保留原始 scope 字段。这些向量是重建的 Accelerate pipeline 结果，不是 Apple 音乐 UI 的动态录制。Rust 测试检查全部 2048 个幅值与六柱值，并额外检查半窗、分段边界、错误长度和非有限输入。
 

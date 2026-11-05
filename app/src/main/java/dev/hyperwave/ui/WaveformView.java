@@ -3,8 +3,11 @@ package dev.hyperwave.ui;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.LinearGradient;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.RectF;
+import android.graphics.Shader;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
@@ -20,6 +23,7 @@ public final class WaveformView extends View implements Choreographer.FrameCallb
     private static final PathInterpolator PAUSE_CURVE = new PathInterpolator(0.33f, 1, 0.67f, 1);
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF rect = new RectF();
+    private final Matrix gradientMatrix = new Matrix();
     private final Handler main = new Handler(Looper.getMainLooper());
     private final float[] start = new float[18];
     private final float[] target = new float[18];
@@ -35,7 +39,9 @@ public final class WaveformView extends View implements Choreographer.FrameCallb
     private volatile int generation;
     private PlaybackCapture capture;
     private boolean reportedLive;
-    private int color = Color.WHITE;
+    private int topColor = Color.WHITE;
+    private int bottomColor = Color.WHITE;
+    private LinearGradient gradient;
     private boolean geometryReady;
 
     public WaveformView(Context context) {
@@ -45,8 +51,15 @@ public final class WaveformView extends View implements Choreographer.FrameCallb
         setFocusable(false);
     }
 
-    public void configure(int uid, boolean isPlaying, int tint) {
-        color = tint;
+    public void setColors(int top, int bottom) {
+        if (topColor == top && bottomColor == bottom) return;
+        topColor = top;
+        bottomColor = bottom;
+        gradient = new LinearGradient(0, 0, 0, 1, top, bottom, Shader.TileMode.CLAMP);
+        invalidate();
+    }
+
+    public void configure(int uid, boolean isPlaying) {
         boolean changed = sourceUid != uid || playing != isPlaying;
         sourceUid = uid;
         playing = isPlaying;
@@ -178,13 +191,20 @@ public final class WaveformView extends View implements Choreographer.FrameCallb
         float base = size * 5 / 48;
         float slot = 1.12f * base;
         float pitch = slot + (size - 6 * slot) / 5;
-        paint.setColor(color);
+        paint.setColor(Color.WHITE);
+        paint.setShader(gradient);
         for (int i = 0; i < 6; i++) {
             float height = shown[i * 3];
             float width = shown[i * 3 + 1];
             float radius = shown[i * 3 + 2];
             float x = left + i * pitch + (slot - width) / 2;
             rect.set(x, center - height / 2, x + width, center + height / 2);
+            if (gradient != null) {
+                // Match the native Lottie fill: each bar spans the full gradient.
+                gradientMatrix.setScale(1, height);
+                gradientMatrix.postTranslate(0, rect.top);
+                gradient.setLocalMatrix(gradientMatrix);
+            }
             canvas.drawRoundRect(rect, radius, radius, paint);
         }
     }
