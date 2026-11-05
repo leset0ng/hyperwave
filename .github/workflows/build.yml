@@ -52,7 +52,7 @@ jobs:
           fi
           echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
           echo "version_name=$version_name" >> "$GITHUB_OUTPUT"
-          echo "artifact_name=HyperWave-${version_name}-arm64-v8a" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=HyperWave-${version_name}-arm64-v8a.apk" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-java@v4
         with:
@@ -116,15 +116,23 @@ jobs:
           "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose --print-certs \
             app/build/outputs/apk/release/app-release.apk
           mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk "dist/$ARTIFACT_NAME.apk"
+          cp app/build/outputs/apk/release/app-release.apk "dist/$ARTIFACT_NAME"
           cd dist
-          sha256sum "$ARTIFACT_NAME.apk" > "$ARTIFACT_NAME.apk.sha256"
+          sha256sum "$ARTIFACT_NAME" > "$ARTIFACT_NAME.sha256"
 
       - name: Upload signed APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.metadata.outputs.artifact_name }}
-          path: dist/*
+          path: dist/*.apk
+          archive: false
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload APK checksum
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/*.sha256
+          archive: false
           if-no-files-found: error
           retention-days: 30
 

@@ -35,10 +35,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
-          name: ${{ needs.build.outputs.artifact_name }}
+          pattern: ${{ needs.build.outputs.artifact_name }}*
+          merge-multiple: true
           path: dist
+
+      - name: Verify APK checksum
+        working-directory: dist
+        run: sha256sum --check *.sha256
 
       - name: Create GitHub Release
         env:
