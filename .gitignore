@@ -1,0 +1,10 @@
+ios-re/
+hyperos-re/
+.gradle/
+.idea/
+**/build/
+/target/
+/local.properties
+/app/src/main/jniLibs/
+*.iml
+.DS_Store
