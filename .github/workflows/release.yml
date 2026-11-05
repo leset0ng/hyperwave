@@ -57,3 +57,37 @@ jobs:
             args+=(--prerelease)
           fi
           gh release create "${args[@]}"
+
+      - name: Publish to Xposed Modules Repo
+        env:
+          GH_TOKEN: ${{ secrets.XPOSED_REPO_TOKEN }}
+          VERSION: ${{ inputs.version }}
+          PRERELEASE: ${{ inputs.prerelease }}
+          SOURCE_RELEASE: ${{ github.server_url }}/${{ github.repository }}/releases/tag/v${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          repo="Xposed-Modules-Repo/io.github.leset0ng.hyperwave"
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "::error::Secret XPOSED_REPO_TOKEN is required to publish to $repo."
+            exit 1
+          fi
+          workdir="$RUNNER_TEMP/xposed"
+          git clone --depth 1 "https://x-access-token:$GH_TOKEN@github.com/$repo.git" "$workdir"
+          cp README.md "$workdir/README.md"
+          pushd "$workdir" >/dev/null
+          if ! git diff --quiet; then
+            git -c user.name="leset0ng" -c user.email="leset0ng@users.noreply.github.com" \
+              commit -am "docs: sync README from ${{ github.repository }}"
+            git push origin HEAD:main
+          fi
+          target="$(git rev-parse HEAD)"
+          popd >/dev/null
+          if gh release view "v$VERSION" --repo "$repo" >/dev/null 2>&1; then
+            gh release delete "v$VERSION" --repo "$repo" --yes --cleanup-tag || true
+          fi
+          notes="$(printf 'HyperWave 让 HyperOS 音乐超级岛的波形跟着音乐跳动。\n\n完整说明与文档：%s' "$SOURCE_RELEASE")"
+          args=("v$VERSION" dist/* --repo "$repo" --target "$target" --title "HyperWave $VERSION" --notes "$notes")
+          if [[ "$PRERELEASE" == 'true' ]]; then
+            args+=(--prerelease)
+          fi
+          gh release create "${args[@]}"
