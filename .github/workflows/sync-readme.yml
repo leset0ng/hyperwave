@@ -1,0 +1,49 @@
+name: Sync module README
+
+on:
+  workflow_call:
+    secrets:
+      XPOSED_REPO_TOKEN:
+        required: true
+    outputs:
+      sha:
+        description: Commit in the Xposed Modules Repo the README was synced to
+        value: ${{ jobs.sync.outputs.sha }}
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.sync.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Mirror README to Xposed Modules Repo
+        id: sync
+        env:
+          GH_TOKEN: ${{ secrets.XPOSED_REPO_TOKEN }}
+          SOURCE_REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          repo="Xposed-Modules-Repo/io.github.leset0ng.hyperwave"
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "::error::Secret XPOSED_REPO_TOKEN is required to sync README to $repo."
+            exit 1
+          fi
+          workdir="$RUNNER_TEMP/xposed"
+          git clone --depth 1 "https://x-access-token:$GH_TOKEN@github.com/$repo.git" "$workdir"
+          cp README.md "$workdir/README.md"
+          cd "$workdir"
+          if [[ -n "$(git status --porcelain README.md)" ]]; then
+            git -c user.name="leset0ng" -c user.email="leset0ng@users.noreply.github.com" \
+              commit -am "docs: sync README from $SOURCE_REPO@${SOURCE_SHA:0:7}"
+            git push origin HEAD:main
+          else
+            echo "README already matches $SOURCE_REPO."
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"

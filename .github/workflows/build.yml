@@ -19,6 +19,8 @@ on:
         required: true
       ANDROID_KEY_PASSWORD:
         required: true
+      XPOSED_REPO_TOKEN:
+        required: false
     outputs:
       artifact_name:
         description: Name of the signed APK artifact
@@ -139,3 +141,8 @@ jobs:
       - name: Remove signing key
         if: always()
         run: rm -f "$RUNNER_TEMP/hyperwave-release.jks"
+
+  sync-readme:
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/sync-readme.yml
+    secrets: inherit

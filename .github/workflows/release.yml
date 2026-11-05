@@ -26,8 +26,12 @@ jobs:
       version_name: ${{ inputs.version }}
     secrets: inherit
 
+  sync-readme:
+    uses: ./.github/workflows/sync-readme.yml
+    secrets: inherit
+
   publish:
-    needs: build
+    needs: [build, sync-readme]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -71,17 +75,10 @@ jobs:
             echo "::error::Secret XPOSED_REPO_TOKEN is required to publish to $repo."
             exit 1
           fi
-          workdir="$RUNNER_TEMP/xposed"
-          git clone --depth 1 "https://x-access-token:$GH_TOKEN@github.com/$repo.git" "$workdir"
-          cp README.md "$workdir/README.md"
-          pushd "$workdir" >/dev/null
-          if ! git diff --quiet; then
-            git -c user.name="leset0ng" -c user.email="leset0ng@users.noreply.github.com" \
-              commit -am "docs: sync README from ${{ github.repository }}"
-            git push origin HEAD:main
+          target="${{ needs.sync-readme.outputs.sha }}"
+          if [[ -z "$target" ]]; then
+            target="$(gh api "repos/$repo/commits/main" --jq .sha)"
           fi
-          target="$(git rev-parse HEAD)"
-          popd >/dev/null
           if gh release view "v$VERSION" --repo "$repo" >/dev/null 2>&1; then
             gh release delete "v$VERSION" --repo "$repo" --yes --cleanup-tag || true
           fi
