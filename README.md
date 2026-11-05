@@ -1,6 +1,6 @@
 # Hyperwave
 
-将 HyperOS 音乐超级岛右侧的预制动画替换为音频驱动波形，可在设置页选择 iOS 六柱外观或保留 HyperOS 原生五柱外观。
+将 HyperOS 音乐超级岛右侧的预制动画替换为音频驱动波形，可在设置页选择 iOS 六柱、HyperOS 原生五柱，或结合六柱与 HyperOS 渐变的 MiOS 外观。
 
 这是基于 **libxposed API 102** 的 LSPosed MVP，Android 接入层使用 Kotlin，DSP 使用 Rust。Android 工程直接位于本仓库根目录。
 
@@ -10,7 +10,7 @@ SystemUI / MIUISystemUIPlugin
     → UID-filtered AudioPolicy + AudioRecord
     → 48 kHz mono Float32, native direct-buffer read loop, 4096-frame blocks
     → Rust Hann + FFT + six-band response → JNI six-bar delivery
-    → Canvas geometry (iOS six bars / native HyperOS five bars) + interruptible transitions
+    → Canvas geometry (iOS / MiOS six bars / native HyperOS five bars) + interruptible transitions
 ```
 
 ## Requirements
@@ -49,7 +49,7 @@ dependencies {
 
 1. 安装 APK，在 LSPosed 中启用 **Hyperwave**，确认推荐作用域 **系统界面 / com.android.systemui** 和 **系统框架 / system** 均已勾选。现代模块的系统进程作用域标识为 `system`，不是 `android`。
 2. 首次启用系统框架作用域或更新其 Hook 后，重启设备或模拟器，让新模块进入 system_server 与 SystemUI。仅重启系统界面无法更新 system_server 中的 Hook。
-3. 打开 Hyperwave，选择“iOS”或“HyperOS”外观，通过“频谱高度”滑块同时调整两种外观的播放柱高（50%–200%，默认 150%）。设置自动保存并实时应用，无需重启系统界面。默认选择 HyperOS。
+3. 打开 Hyperwave，选择“iOS”、“HyperOS”或“MiOS”外观，通过“频谱高度”滑块调整所有外观的播放柱高（50%–200%，默认 150%）。设置自动保存并实时应用，无需重启系统界面。默认选择 HyperOS。
 4. 播放音乐并回到桌面。模块接管 `musicWave` / `musicPause` 图标，保留 HyperOS 原有岛容器、封面和点击行为。
 
 应用仅提供外观和高度设置。合成音源位于 `androidTest`，供设备音频捕获回归验证使用。
@@ -71,7 +71,8 @@ dependencies {
 - iOS 外观：六柱、实时 `5S/48` 基础宽、预制 `S/8` 基础宽、动态增粗和圆角像素取整；封面采用 HSP 亮度处理、饱和度、明暗 scrim、模糊，再以柱形遮罩合成。
 - iOS fallback：三种真实轨迹排列、2.66 秒循环、非均匀 keyTimes 的三次 Hermite 插值，第六柱保持最低高度。插值公式经本机公开 QuartzCore presentation 采样核对。
 - HyperOS 外观：五柱、固定柱宽与圆角，继承原 Lottie View/Stub 的尺寸、margin 和 gravity。48 kHz 六个 DSP 频段重采样至五个显示柱；无额外改变 DSP 公式。fallback 使用原生 `music_wave` 的高度和渐变轨迹，暂停采用原生高度与反向渐变。
-- Hook 原生 `IslandIconViewHolder.getLottieColor(Bitmap)`，读取返回的上下渐变色并原样保留返回值；HyperOS 模式保留系统取色及 60% 不透明度，颜色和外观更新均不重启采集。
+- MiOS 外观：沿用 iOS 六柱几何、连续圆角、动态增粗和 fallback，采用 HyperOS 原生封面上下渐变及其透明度；渐变覆盖每根柱高，暂停时反向。
+- Hook 原生 `IslandIconViewHolder.getLottieColor(Bitmap)`，读取返回的上下渐变色并原样保留返回值；HyperOS 与 MiOS 模式保留系统取色及 60% 不透明度，颜色和外观更新均不重启采集。
 - 设置保存在设备保护存储，通过只读 ContentProvider 和 ContentObserver 同步到 SystemUI；读取和封面处理在后台执行。
 
 ## MVP boundaries

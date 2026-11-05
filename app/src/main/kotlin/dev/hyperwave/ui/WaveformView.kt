@@ -21,7 +21,7 @@ import dev.hyperwave.AppearanceSettings.Style
 import dev.hyperwave.audio.PlaybackCapture
 import java.util.concurrent.ThreadLocalRandom
 
-/** Audio-driven geometry with separate iOS and native HyperOS appearances. */
+/** Audio-driven geometry with iOS, native HyperOS, and hybrid MiOS appearances. */
 class WaveformView(context: Context) : View(context), Choreographer.FrameCallback {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val rect = RectF()
@@ -76,7 +76,8 @@ class WaveformView(context: Context) : View(context), Choreographer.FrameCallbac
         refreshShown(now)
         style = next
         nativeSize = nextNativeSize
-        calculate(if (playing) values else silence, unavailable, geometry)
+        val levels = if (!playing) silence else if (unavailable) fallbackValues else values
+        calculate(levels, unavailable, geometry)
         motion.transition(geometry, now, 80L)
         scheduleFrame()
         invalidate()
@@ -193,13 +194,13 @@ class WaveformView(context: Context) : View(context), Choreographer.FrameCallbac
 
     private fun calculate(levels: FloatArray, fallback: Boolean, output: FloatArray) {
         val size = minOf(width, height).toFloat()
-        WaveformGeometry.calculate(style == Style.IOS, levels, size,
+        WaveformGeometry.calculate(style.usesSixBars, levels, size,
                 fallback, playing, output, if (nativeSize > 0f) nativeSize else size, heightScale)
     }
 
     private fun refreshShown(now: Long) {
         if (playing && unavailable) {
-            if (style == Style.IOS) {
+            if (style.usesSixBars) {
                 FallbackFrames.sample((now - fallbackStart) / 2660.0, fallbackVariant, fallbackValues)
             } else {
                 HyperOsFallback.sample(now - fallbackStart, fallbackValues, nativeGradientStart, nativeGradientEnd)
@@ -258,7 +259,11 @@ class WaveformView(context: Context) : View(context), Choreographer.FrameCallbac
             val x = left + motion.shown[offset + 3] - barWidth / 2
             rect.set(x, center - barHeight / 2, x + barWidth, center + barHeight / 2)
             if (!ios && shader != null) {
-                if (playing) {
+                if (style == Style.MIOS) {
+                    // Map the native palette across each six-bar shape, reversing it on pause.
+                    shaderMatrix.setScale(1f, if (playing) barHeight else -barHeight)
+                    shaderMatrix.postTranslate(0f, if (playing) rect.top else rect.bottom)
+                } else if (playing) {
                     val sourceHeight = motion.shown[offset] / heightScale
                     val level = maxOf(0f, minOf(1f, (sourceHeight * 66 / size - 10.962f) / 33.756f))
                     val scale = size / 66 * barHeight / sourceHeight
@@ -273,7 +278,7 @@ class WaveformView(context: Context) : View(context), Choreographer.FrameCallbac
                 }
                 shader.setLocalMatrix(shaderMatrix)
             }
-            if (ios) {
+            if (style.usesSixBars) {
                 canvas.drawPath(cornerBuilders[i].build(rect, radius), paint)
             } else canvas.drawRoundRect(rect, radius, radius, paint)
         }

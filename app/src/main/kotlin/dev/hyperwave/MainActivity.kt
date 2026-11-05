@@ -41,11 +41,23 @@ class MainActivity : Activity() {
         val styles = RadioGroup(this)
         val ios = option(R.string.appearance_ios)
         val hyperos = option(R.string.appearance_hyperos)
+        val mios = option(R.string.appearance_mios)
         styles.addView(ios)
         styles.addView(hyperos)
-        styles.check(if (AppearanceSettings.load(this) == Style.IOS) ios.id else hyperos.id)
+        styles.addView(mios)
+        styles.check(when (AppearanceSettings.load(this)) {
+            Style.IOS -> ios.id
+            Style.HYPEROS -> hyperos.id
+            Style.MIOS -> mios.id
+        })
         styles.setOnCheckedChangeListener { _, checkedId ->
-            AppearanceSettings.save(this, if (checkedId == ios.id) Style.IOS else Style.HYPEROS)
+            val selected = when (checkedId) {
+                ios.id -> Style.IOS
+                hyperos.id -> Style.HYPEROS
+                mios.id -> Style.MIOS
+                else -> return@setOnCheckedChangeListener
+            }
+            AppearanceSettings.save(this, selected)
         }
         layout.addView(styles)
         val hint = text(R.string.appearance_hint)

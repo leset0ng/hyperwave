@@ -5,6 +5,7 @@
     <string name="appearance_title">外观</string>
     <string name="appearance_ios">iOS\n六柱、连续圆角与封面着色</string>
     <string name="appearance_hyperos">HyperOS\n沿用系统柱形与封面渐变</string>
+    <string name="appearance_mios">MiOS\nios和hyperos结合体</string>
     <string name="appearance_hint">选择后自动保存，已加载的模块会立即应用。</string>
     <string name="height_title">频谱高度</string>
     <string name="height_percent">%1$d%%</string>

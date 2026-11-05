@@ -15,10 +15,12 @@ object AppearanceSettings {
     private const val PREFERENCES = "appearance"
 
     enum class Style(val value: String) {
-        IOS("ios"), HYPEROS("hyperos");
+        IOS("ios"), HYPEROS("hyperos"), MIOS("mios");
+
+        val usesSixBars: Boolean get() = this != HYPEROS
 
         companion object {
-            fun parse(value: String?): Style = if (IOS.value == value) IOS else HYPEROS
+            fun parse(value: String?): Style = entries.firstOrNull { it.value == value } ?: HYPEROS
         }
     }
 
