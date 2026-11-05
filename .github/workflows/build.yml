@@ -1,0 +1,131 @@
+name: Build release APK
+
+on:
+  push:
+    branches: [main]
+  workflow_call:
+    inputs:
+      version_name:
+        description: Version name for a manually published release
+        type: string
+        required: false
+        default: ''
+    secrets:
+      ANDROID_KEYSTORE_BASE64:
+        required: true
+      ANDROID_KEYSTORE_PASSWORD:
+        required: true
+      ANDROID_KEY_ALIAS:
+        required: true
+      ANDROID_KEY_PASSWORD:
+        required: true
+    outputs:
+      artifact_name:
+        description: Name of the signed APK artifact
+        value: ${{ jobs.build.outputs.artifact_name }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      artifact_name: ${{ steps.metadata.outputs.artifact_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare version and artifact name
+        id: metadata
+        env:
+          INPUT_VERSION_NAME: ${{ inputs.version_name }}
+        run: |
+          set -euo pipefail
+          version_code=$(( $(git rev-list --count HEAD) + 1 ))
+          version_name="${INPUT_VERSION_NAME:-0.1.0-dev.${version_code}+$(git rev-parse --short HEAD)}"
+          if [[ ! "$version_name" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Version must use semantic versioning, for example 0.1.0 or 0.1.0-rc.1."
+            exit 1
+          fi
+          echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
+          echo "version_name=$version_name" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=HyperWave-${version_name}-arm64-v8a" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK and NDK
+        run: sdkmanager 'platforms;android-37' 'build-tools;37.0.0' 'ndk;30.0.15729638'
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Restore signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for secret in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [[ -z "${!secret}" ]]; then
+              echo "::error::Missing signing secret: $secret"
+              exit 1
+            fi
+          done
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/hyperwave-release.jks"
+
+      - name: Test Rust DSP
+        run: cargo test --locked -p hyperwave-dsp
+
+      - name: Build and test signed release APK
+        env:
+          HYPERWAVE_KEYSTORE_PATH: ${{ runner.temp }}/hyperwave-release.jks
+          HYPERWAVE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          HYPERWAVE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          HYPERWAVE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          VERSION_CODE: ${{ steps.metadata.outputs.version_code }}
+          VERSION_NAME: ${{ steps.metadata.outputs.version_name }}
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/30.0.15729638"
+          ./gradlew --no-daemon --build-cache :app:testDebugUnitTest :app:lintRelease :app:assembleRelease \
+            -PhyperwaveVersionCode="$VERSION_CODE" \
+            -PhyperwaveVersionName="$VERSION_NAME"
+
+      - name: Verify and package APK
+        env:
+          ARTIFACT_NAME: ${{ steps.metadata.outputs.artifact_name }}
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose --print-certs \
+            app/build/outputs/apk/release/app-release.apk
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk "dist/$ARTIFACT_NAME.apk"
+          cd dist
+          sha256sum "$ARTIFACT_NAME.apk" > "$ARTIFACT_NAME.apk.sha256"
+
+      - name: Upload signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.metadata.outputs.artifact_name }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/hyperwave-release.jks"

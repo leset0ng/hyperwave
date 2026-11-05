@@ -7,8 +7,8 @@ android {
         applicationId = "ng.lst.hyperwave"
         minSdk = 33
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = providers.gradleProperty("hyperwaveVersionCode").orElse("1").get().toInt()
+        versionName = providers.gradleProperty("hyperwaveVersionName").orElse("0.1.0").get()
         testInstrumentationRunner = "ng.lst.hyperwave.ui.PerformanceInstrumentation"
         ndk { abiFilters += "arm64-v8a" }
     }
@@ -16,8 +16,22 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    signingConfigs {
+        val keystorePath = providers.environmentVariable("HYPERWAVE_KEYSTORE_PATH").orNull
+        if (keystorePath != null) {
+            create("release") {
+                storeFile = file(keystorePath)
+                storePassword = providers.environmentVariable("HYPERWAVE_KEYSTORE_PASSWORD").get()
+                keyAlias = providers.environmentVariable("HYPERWAVE_KEY_ALIAS").get()
+                keyPassword = providers.environmentVariable("HYPERWAVE_KEY_PASSWORD").get()
+            }
+        }
+    }
     buildTypes {
-        release { isMinifyEnabled = false }
+        release {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
+        }
     }
     packaging {
         jniLibs { useLegacyPackaging = true }

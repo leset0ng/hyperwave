@@ -1,0 +1,54 @@
+name: Publish release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version without the v prefix (for example, 0.1.0)'
+        type: string
+        required: true
+      prerelease:
+        description: Mark as a prerelease
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    with:
+      version_name: ${{ inputs.version }}
+    secrets: inherit
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.artifact_name }}
+          path: dist
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          args=("v$VERSION" dist/* --target "$GITHUB_SHA" --title "HyperWave $VERSION" --generate-notes)
+          if [[ "$PRERELEASE" == 'true' ]]; then
+            args+=(--prerelease)
+          fi
+          gh release create "${args[@]}"
