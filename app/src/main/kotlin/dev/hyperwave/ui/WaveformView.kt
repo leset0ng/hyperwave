@@ -243,12 +243,13 @@ class WaveformView(context: Context) : View(context), Choreographer.FrameCallbac
             rect.set(x, center - barHeight / 2, x + barWidth, center + barHeight / 2)
             if (!ios && shader != null) {
                 if (playing) {
-                    val level = maxOf(0f, minOf(1f, (barHeight * 66 / size - 10.962f) / 33.756f))
+                    val level = maxOf(0f, minOf(1f, (barHeight * 66 / size - 10.962f) / 55.038f))
+                    val scale = barHeight / (10.962f + 33.756f * level)
                     val half = 5.313f + (19.659f - 5.313f) * level
                     val start = if (unavailable && i < 5) nativeGradientStart[i] else -half
                     val end = if (unavailable && i < 5) nativeGradientEnd[i] else half
-                    shaderMatrix.setScale(1f, (end - start) * size / 66)
-                    shaderMatrix.postTranslate(0f, center + start * size / 66)
+                    shaderMatrix.setScale(1f, (end - start) * scale)
+                    shaderMatrix.postTranslate(0f, center + start * scale)
                 } else {
                     shaderMatrix.setScale(1f, -12 * size / 66)
                     shaderMatrix.postTranslate(0f, center + 6 * size / 66)

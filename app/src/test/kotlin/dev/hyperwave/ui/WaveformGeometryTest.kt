@@ -40,7 +40,7 @@ class WaveformGeometryTest {
         val output = FloatArray(24)
         WaveformGeometry.calculate(false, levels, 66f, false, true, output)
         assertEquals(10.962, output[0].toDouble(), 0.000002)
-        assertEquals(44.718, output[16].toDouble(), 0.000004)
+        assertEquals(66.0, output[16].toDouble(), 0.000004)
         assertEquals(output[1].toDouble(), output[17].toDouble(), 0.0)
     }
 
@@ -48,7 +48,7 @@ class WaveformGeometryTest {
     fun hyperosFallbackAnimatesAllFiveColumns() {
         val output = FloatArray(24)
         WaveformGeometry.calculate(false, floatArrayOf(1f, 1f, 1f, 1f, 1f, 0f), 66f, true, true, output)
-        for (i in 0 until 5) assertEquals(44.718, output[i * 4].toDouble(), 0.000004)
+        for (i in 0 until 5) assertEquals(66.0, output[i * 4].toDouble(), 0.000004)
         assertEquals(0.0, output[20].toDouble(), 0.0)
     }
 }

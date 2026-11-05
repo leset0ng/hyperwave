@@ -25,7 +25,7 @@ internal object WaveformGeometry {
                 val level = if (fallback) levels[minOf(i, 4)]
                         else levels[left] + (levels[right] - levels[left]) * (position - left)
                 val value = maxOf(0f, minOf(1f, level))
-                output[offset] = if (i == 5) 0f else size / 66 * (if (playing) 10.962f + 33.756f * value else 17.4f)
+                output[offset] = if (i == 5) 0f else size / 66 * (if (playing) 10.962f + 55.038f * value else 17.4f)
                 output[offset + 1] = if (i == 5) 0f else size * 5.4f / 66
                 output[offset + 2] = output[offset + 1] / 2
                 output[offset + 3] = size * (9 + 12 * minOf(i, 4)) / 66
