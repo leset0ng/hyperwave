@@ -23,11 +23,17 @@ class PlaybackCapture(
         fun onUnavailable(reason: String)
     }
 
-    @Volatile
-    private var stopped = false
-
-    @Volatile
-    private var record: AudioRecord? = null
+    private val lifecycle = CaptureLifecycle<AudioRecord>(
+            "HyperWave-stop-$uid",
+            stopRecord = { current ->
+                try {
+                    current.stop()
+                } catch (ignored: IllegalStateException) {
+                }
+            },
+            releaseRecord = { it.release() },
+    )
+    private val stopped: Boolean get() = lifecycle.isStopped
     private val thread = Thread(this, "HyperWave-capture-$uid")
 
     fun start() {
@@ -41,22 +47,21 @@ class PlaybackCapture(
     }
 
     fun stop() {
-        stopped = true
-        val current = record
-        if (current != null) {
-            try {
-                current.stop()
-            } catch (ignored: IllegalStateException) {
-            }
-        }
-        thread.interrupt()
+        lifecycle.stop()
     }
 
     override fun run() {
         try {
             runSession()
         } finally {
-            active.remove(this)
+            try {
+                lifecycle.awaitStopped()?.let { error ->
+                    cleanupFailed = true
+                    Log.e(TAG, "Cannot stop audio record", error)
+                }
+            } finally {
+                active.remove(this)
+            }
         }
     }
 
@@ -141,17 +146,18 @@ class PlaybackCapture(
             registered = true
             val current = policyClass.getMethod("createAudioRecordSink", mixClass)
                     .invoke(policy, mix) as AudioRecord?
-            record = current
-            if (current == null || current.state != AudioRecord.STATE_INITIALIZED)
-                throw IllegalStateException("Playback AudioRecord not initialized")
-            if (current.sampleRate != 48000 || current.channelCount != 1
-                    || current.audioFormat != AudioFormat.ENCODING_PCM_FLOAT)
-                throw IllegalStateException("Unexpected playback capture format")
-            if (stopped) return
-            current.startRecording()
-            if (current.recordingState != AudioRecord.RECORDSTATE_RECORDING)
-                throw IllegalStateException("Playback AudioRecord did not start")
-            onStarted()
+            if (current == null) throw IllegalStateException("Playback AudioRecord not initialized")
+            if (!lifecycle.start(current) {
+                if (it.state != AudioRecord.STATE_INITIALIZED)
+                    throw IllegalStateException("Playback AudioRecord not initialized")
+                if (it.sampleRate != 48000 || it.channelCount != 1
+                        || it.audioFormat != AudioFormat.ENCODING_PCM_FLOAT)
+                    throw IllegalStateException("Unexpected playback capture format")
+                it.startRecording()
+                if (it.recordingState != AudioRecord.RECORDSTATE_RECORDING)
+                    throw IllegalStateException("Playback AudioRecord did not start")
+                onStarted()
+            }) return
             Log.i(TAG, "capture path uid=$uid mode=${if (privileged) "privileged" else "legacy"}")
             Log.i(TAG, "capture started uid=$uid 48000Hz mono float32 reader=native")
             NativeDsp.capture(current, object : NativeDsp.CaptureCallback {
@@ -166,20 +172,12 @@ class PlaybackCapture(
                 }
             })
         } finally {
-            val current = record
-            record = null
             var released = true
-            if (current != null) {
-                try {
-                    current.stop()
-                } catch (ignored: IllegalStateException) {
-                }
-                try {
-                    current.release()
-                } catch (error: RuntimeException) {
-                    released = false
-                    Log.e(TAG, "Cannot release audio record", error)
-                }
+            try {
+                lifecycle.release()
+            } catch (error: RuntimeException) {
+                released = false
+                Log.e(TAG, "Cannot stop or release audio record", error)
             }
             if (registered) {
                 try {
@@ -201,7 +199,7 @@ class PlaybackCapture(
         private val active = ConcurrentHashMap.newKeySet<PlaybackCapture>()
         @Volatile private var cleanupFailed = false
 
-        /** Also waits for sessions already stopped by a hide/source change. */
+        /** Also waits for capture and stop workers already retiring after a hide/source change. */
         internal fun stopAllAndAwait(timeoutMillis: Long): Boolean {
             val sessions = active.toList()
             sessions.forEach { it.stop() }
