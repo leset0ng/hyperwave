@@ -13,6 +13,7 @@ import io.github.libxposed.api.XposedInterface
 /** Keeps the format exception local to a marked, UID-filtered music loopback. */
 internal class FullRateCaptureHooks(
         private val module: XposedInterface,
+        private val hooks: ReloadableHooks,
         private val systemServer: Boolean,
 ) {
     private val scope = CaptureFormatScope()
@@ -25,11 +26,11 @@ internal class FullRateCaptureHooks(
         val mixClass = Class.forName("android.media.audiopolicy.AudioMix", false, loader)
         val builderClass = Class.forName("android.media.audiopolicy.AudioMix\$Builder", false, loader)
         val validate = mixClass.getDeclaredMethod("canBeUsedForPrivilegedMediaCapture", AudioFormat::class.java)
-        module.hook(validate).intercept { chain ->
+        hooks.install(validate, "capture.validate") { chain ->
             if (scope.allows(chain.getArg(0))) null else chain.proceed()
         }
         val build = builderClass.getDeclaredMethod("build")
-        module.hook(build).intercept { chain ->
+        hooks.install(build, "capture.build") { chain ->
             val format = inspect {
                 if (!trustedCaller()) return@inspect null
                 val builder = chain.thisObject ?: return@inspect null
@@ -44,7 +45,7 @@ internal class FullRateCaptureHooks(
         if (systemServer) {
             val service = Class.forName("com.android.server.audio.AudioService", false, loader)
             val allowed = service.declaredMethods.single { it.name == "isPolicyRegisterAllowed" }
-            module.hook(allowed).intercept { chain ->
+            hooks.install(allowed, "capture.policy") { chain ->
                 val format = inspect {
                     if (!trustedCaller()) return@inspect null
                     val config = chain.getArg(0) ?: return@inspect null

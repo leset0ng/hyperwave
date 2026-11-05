@@ -19,9 +19,12 @@ import android.widget.FrameLayout
 import ng.lst.hyperwave.AppearanceSettings
 import ng.lst.hyperwave.AppearanceSettings.Style
 import ng.lst.hyperwave.audio.NativeDsp
+import ng.lst.hyperwave.audio.PlaybackCapture
 import ng.lst.hyperwave.ui.ArtworkBackdrop
 import ng.lst.hyperwave.ui.WaveformView
 import io.github.libxposed.api.XposedModule
+import io.github.libxposed.api.XposedModuleInterface.HotReloadingParam
+import io.github.libxposed.api.XposedModuleInterface.HotReloadedParam
 import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
 import io.github.libxposed.api.XposedModuleInterface.SystemServerStartingParam
@@ -31,15 +34,23 @@ import java.util.Collections
 import java.util.WeakHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.FutureTask
+import java.util.concurrent.TimeUnit
 
 class HyperWaveModule : XposedModule() {
     private val installed: MutableSet<ClassLoader> = Collections.newSetFromMap(WeakHashMap())
     private val entries = WeakHashMap<Any, Entry>()
     private val main by lazy { Handler(Looper.getMainLooper()) }
-    private val background: ExecutorService by lazy { Executors.newSingleThreadExecutor() }
+    private val hooks = ReloadableHooks(this)
+    private var background: ExecutorService? = null
+    private val workers = ArrayList<ExecutorService>()
+    private var hostLoader: ClassLoader? = null
+    private var serverLoader: ClassLoader? = null
+    private val palettes = WeakHashMap<ClassLoader, Palette>()
     private var style = Style.HYPEROS
     private var heightPercent = AppearanceSettings.DEFAULT_HEIGHT_PERCENT
     private var settingsObserver: ContentObserver? = null
+    private var settingsContext: Context? = null
     private var nativeReady = false
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
@@ -49,7 +60,7 @@ class HyperWaveModule : XposedModule() {
         }
         if (SYSTEM_UI != param.processName) return
         try {
-            FullRateCaptureHooks(this, false).install(javaClass.classLoader!!)
+            FullRateCaptureHooks(this, hooks, false).install(javaClass.classLoader!!)
         } catch (error: Throwable) {
             report("Full-rate capture hooks unavailable; legacy capture remains available", error)
         }
@@ -63,21 +74,33 @@ class HyperWaveModule : XposedModule() {
     }
 
     override fun onSystemServerStarting(param: SystemServerStartingParam) {
-        try {
-            FullRateCaptureHooks(this, true).install(param.classLoader)
+        installServer(param.classLoader)
+    }
+
+    private fun installServer(loader: ClassLoader): Boolean {
+        serverLoader = loader
+        return try {
+            FullRateCaptureHooks(this, hooks, true).install(loader)
+            true
         } catch (error: Throwable) {
             report("Full-rate system capture unavailable; retaining format restrictions", error)
+            false
         }
     }
 
     override fun onPackageReady(param: PackageReadyParam) {
-        if (!nativeReady || SYSTEM_UI != param.packageName) return
-        val host = param.classLoader
-        try {
+        if (SYSTEM_UI != param.packageName) return
+        hostLoader = param.classLoader
+        if (nativeReady) installHost(param.classLoader)
+    }
+
+    private fun installHost(host: ClassLoader): Boolean {
+        hostLoader = host
+        return try {
             val factory = Class.forName("com.android.systemui.shared.plugins.PluginInstance\$PluginFactory",
                     false, host)
             val createLoader = factory.getDeclaredMethod("createClassLoader")
-            hook(createLoader).intercept { chain ->
+            hooks.install(createLoader, "plugin.loader") { chain ->
                 val result = chain.proceed()
                 try {
                     val info = Reflect.field(chain.thisObject ?: error("Hook without a receiver"),
@@ -92,28 +115,33 @@ class HyperWaveModule : XposedModule() {
             val cacheField = injector.getDeclaredField("sClassLoaders")
             cacheField.isAccessible = true
             val cache = cacheField.get(null)
-            if (cache is Map<*, *>) (cache[PLUGIN] as? ClassLoader)?.let(::installPlugin)
+            if (cache is Map<*, *>) (cache[PLUGIN] as? ClassLoader)?.let {
+                check(installPlugin(it)) { "Cannot install cached plugin hooks" }
+            }
             log(Log.INFO, TAG, "watching SystemUI plugin ClassLoader")
+            true
         } catch (error: Throwable) {
             report("SystemUI build is unsupported", error)
+            false
         }
     }
 
     @Synchronized
-    private fun installPlugin(loader: ClassLoader) {
-        if (installed.contains(loader)) return
-        try {
+    private fun installPlugin(loader: ClassLoader): Boolean {
+        if (hooks.paused) return false
+        if (installed.contains(loader)) return true
+        return try {
             val holderClass = Class.forName(HOLDER, false, loader)
-            val palette = Palette()
+            val palette = palettes.getOrPut(loader) { Palette() }
             installColorHook(holderClass, palette)
             var methods = 0
             for (method in holderClass.declaredMethods) {
                 val name = method.name
                 if (name == "playAnimation" || name == "playBigAnimation") {
-                    hook(method).intercept { chain ->
+                    hooks.install(method, "island.$name") { chain ->
                         try {
                             if (replace(chain.thisObject ?: error("Hook without a receiver"), palette,
-                                            name == "playBigAnimation")) return@intercept null
+                                            name == "playBigAnimation")) return@install null
                         } catch (error: Throwable) {
                             report("Music replacement failed; keeping original", error)
                         }
@@ -121,7 +149,7 @@ class HyperWaveModule : XposedModule() {
                     }
                     methods++
                 } else if (name == "bind") {
-                    hook(method).intercept { chain ->
+                    hooks.install(method, "island.bind") { chain ->
                         val result = chain.proceed()
                         try {
                             val holder = chain.thisObject ?: error("Hook without a receiver")
@@ -132,15 +160,15 @@ class HyperWaveModule : XposedModule() {
                         result
                     }
                 } else if (name == "onHidden" || name == "onDetach") {
-                    hook(method).intercept { chain ->
-                        chain.thisObject?.let { entries[it]?.view?.setHostVisible(false) }
+                    hooks.install(method, "island.$name") { chain ->
+                        chain.thisObject?.let { setHostVisible(it, false) }
                         chain.proceed()
                     }
                 } else if (name == "onShow") {
-                    hook(method).intercept { chain ->
+                    hooks.install(method, "island.onShow") { chain ->
                         val result = chain.proceed()
                         try {
-                            chain.thisObject?.let { entries[it]?.view?.setHostVisible(true) }
+                            chain.thisObject?.let { setHostVisible(it, true) }
                         } catch (error: Throwable) {
                             report("Music show failed", error)
                         }
@@ -151,8 +179,10 @@ class HyperWaveModule : XposedModule() {
             check(methods == 2) { "Expected two island animation methods, found $methods" }
             installed.add(loader)
             log(Log.INFO, TAG, "music island hooks installed for plugin $loader")
+            true
         } catch (error: Throwable) {
             report("Cannot install plugin hooks", error)
+            false
         }
     }
 
@@ -167,14 +197,14 @@ class HyperWaveModule : XposedModule() {
             bottom.isAccessible = true
             palette.top = top.getInt(null)
             palette.bottom = bottom.getInt(null)
-            hook(getColor).intercept { chain ->
+            hooks.install(getColor, "island.color") { chain ->
                 val result = chain.proceed()
                 try {
                     if (result != null) {
                         val topColor = (first.get(result) as Number).toInt()
                         val bottomColor = (second.get(result) as Number).toInt()
                         // HyperOS computes the palette on IO; views are updated on main.
-                        main.post {
+                        postUpdate {
                             palette.top = topColor
                             palette.bottom = bottomColor
                             for (entry in entries.values) {
@@ -205,8 +235,14 @@ class HyperWaveModule : XposedModule() {
         return field
     }
 
-    private fun replace(holder: Any, palette: Palette, big: Boolean?): Boolean {
-        if (Looper.myLooper() != Looper.getMainLooper()) return false
+    private fun replace(
+            holder: Any,
+            palette: Palette,
+            big: Boolean?,
+            restoredParams: FrameLayout.LayoutParams? = null,
+            restoredVisible: Boolean = true,
+    ): Boolean {
+        if (hooks.paused || Looper.myLooper() != Looper.getMainLooper()) return false
         val picInfo = Reflect.field(holder, "picInfo") ?: return false
         val pic = Reflect.call(picInfo, "getPic") as? String
         if (pic != "musicWave" && pic != "musicPause") return false
@@ -228,9 +264,11 @@ class HyperWaveModule : XposedModule() {
         if (entry == null || entry.container !== container) {
             remove(holder)
             val view = WaveformView(context)
-            val nativeParams = nativeLayout(holder, big == true, context)
+            view.setHostVisible(restoredVisible)
+            val nativeParams = restoredParams ?: nativeLayout(holder, big == true, context)
             container.addView(view, FrameLayout.LayoutParams(nativeParams))
             entry = Entry(container, view, palette, nativeParams)
+            entry.hostVisible = restoredVisible
             entries[holder] = entry
             log(Log.INFO, TAG, "replaced $pic for $source uid=$uid")
         }
@@ -240,7 +278,10 @@ class HyperWaveModule : XposedModule() {
         for (i in 0 until container.childCount) {
             val child = container.getChildAt(i)
             if (child === entry.view) continue
-            if (child.visibility == View.VISIBLE) child.visibility = View.GONE
+            if (child.visibility == View.VISIBLE) {
+                entry.hiddenViews.putIfAbsent(child, child.visibility)
+                child.visibility = View.GONE
+            }
         }
         entry.view.visibility = View.VISIBLE
         entry.view.setColors(palette.top, palette.bottom)
@@ -260,6 +301,7 @@ class HyperWaveModule : XposedModule() {
         settingsObserver = observer
         try {
             target.contentResolver.registerContentObserver(AppearanceSettings.URI, false, observer)
+            settingsContext = target
             readSettings(target)
         } catch (error: RuntimeException) {
             settingsObserver = null
@@ -268,17 +310,17 @@ class HyperWaveModule : XposedModule() {
     }
 
     private fun readSettings(context: Context) {
-        background.execute {
+        inBackground {
             try {
                 context.contentResolver.query(AppearanceSettings.URI, null, null, null, null)?.use { cursor ->
-                    if (!cursor.moveToFirst()) return@execute
+                    if (!cursor.moveToFirst()) return@inBackground
                     val next = Style.parse(cursor.getString(
                             cursor.getColumnIndexOrThrow(AppearanceSettings.COLUMN_STYLE)))
                     val heightColumn = cursor.getColumnIndex(AppearanceSettings.COLUMN_HEIGHT_PERCENT)
                     val nextHeight = (if (heightColumn >= 0) cursor.getInt(heightColumn)
                             else AppearanceSettings.DEFAULT_HEIGHT_PERCENT)
                             .coerceIn(AppearanceSettings.MIN_HEIGHT_PERCENT, AppearanceSettings.MAX_HEIGHT_PERCENT)
-                    main.post {
+                    postUpdate {
                         style = next
                         heightPercent = nextHeight
                         for (entry in entries.values) applyAppearance(entry)
@@ -381,15 +423,15 @@ class HyperWaveModule : XposedModule() {
         val icon = entry.artworkIcon ?: return
         val source = entry.source
         val logicalSize = if (sizeIndex == 0) 16f else 22f
-        background.execute {
+        inBackground {
             try {
-                if (token != entry.artworkGeneration) return@execute
+                if (hooks.paused || token != entry.artworkGeneration) return@inBackground
                 val drawable = icon.loadDrawable(context)
-                if (token != entry.artworkGeneration) return@execute
+                if (hooks.paused || token != entry.artworkGeneration) return@inBackground
                 val backdrop = if (drawable == null) null
                         else ArtworkBackdrop.prepare(drawable, logicalSize)
-                main.post {
-                    if (token != entry.artworkGeneration) return@post
+                postUpdate {
+                    if (token != entry.artworkGeneration) return@postUpdate
                     entry.preparingArtworkSize = -1
                     entry.artworkBackdrops[sizeIndex] = backdrop
                     entry.artworkPrepared[sizeIndex] = true
@@ -397,7 +439,7 @@ class HyperWaveModule : XposedModule() {
                     Log.i(TAG, "artwork applied source=$source ready=${backdrop != null}")
                 }
             } catch (error: RuntimeException) {
-                main.post {
+                postUpdate {
                     if (token == entry.artworkGeneration) entry.preparingArtworkSize = -1
                 }
                 report("Cannot prepare waveform artwork", error)
@@ -408,8 +450,171 @@ class HyperWaveModule : XposedModule() {
     private fun remove(holder: Any) {
         val entry = entries.remove(holder) ?: return
         entry.artworkGeneration++
-        entry.view.setHostVisible(false)
+        entry.view.dispose()
         entry.container.removeView(entry.view)
+        for ((view, visibility) in entry.hiddenViews) view.visibility = visibility
+        entry.hiddenViews.clear()
+    }
+
+    override fun onHotReloading(param: HotReloadingParam): Boolean {
+        if (!hooks.pause()) {
+            log(Log.WARN, TAG, "Hot reload rejected; hook invocation is still in flight")
+            return false
+        }
+        var state: Map<String, Any>? = null
+        val retiredViews = ArrayList<WaveformView>()
+        return try {
+            state = onMain {
+                val snapshot = saveReloadState()
+                state = snapshot
+                retiredViews.addAll(entries.values.map { it.view })
+                settingsObserver?.let { settingsContext?.contentResolver?.unregisterContentObserver(it) }
+                settingsObserver = null
+                for (holder in entries.keys.toList()) remove(holder)
+                snapshot
+            }
+            val retiringWorkers = synchronized(this) {
+                background = null
+                ArrayList(workers)
+            }
+            retiringWorkers.forEach { it.shutdownNow() }
+            check(PlaybackCapture.stopAllAndAwait(RELOAD_TIMEOUT_MS)) { "Audio capture did not retire" }
+            val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(RELOAD_TIMEOUT_MS)
+            for (worker in retiringWorkers) {
+                check(worker.awaitTermination(maxOf(0L, deadline - System.nanoTime()), TimeUnit.NANOSECONDS)) {
+                    "Background work did not retire"
+                }
+            }
+            onMain {
+                retiredViews.forEach { it.dispose() }
+                main.removeCallbacksAndMessages(null)
+            }
+            param.setSavedInstanceState(state)
+            NativeDsp.retireReloadCopy()
+            synchronized(this) {
+                installed.clear()
+                palettes.clear()
+                workers.clear()
+            }
+            log(Log.INFO, TAG, "old generation ready for hot reload")
+            true
+        } catch (error: Throwable) {
+            report("Hot reload rejected; restoring current generation", error)
+            hooks.resume()
+            state?.let { snapshot -> onMain { restoreEntries(snapshot) } }
+            false
+        }
+    }
+
+    override fun onHotReloaded(param: HotReloadedParam) {
+        val state = param.savedInstanceState as? Map<*, *> ?: emptyMap<Any, Any>()
+        hooks.adopt(param.oldHookHandles)
+        try {
+            if (param.isSystemServer) {
+                val loader = state["serverLoader"] as? ClassLoader
+                        ?: error("Missing system_server ClassLoader")
+                check(installServer(loader)) { "System capture hook restoration failed" }
+            } else if (param.processName == SYSTEM_UI) {
+                val context = state["context"] as? Context ?: currentApplication()
+                NativeDsp.loadForReload(context, moduleApplicationInfo.nativeLibraryDir)
+                nativeReady = true
+                try {
+                    FullRateCaptureHooks(this, hooks, false).install(javaClass.classLoader!!)
+                } catch (error: Throwable) {
+                    report("Full-rate capture hooks unavailable after reload; legacy capture remains available", error)
+                }
+                val host = state["hostLoader"] as? ClassLoader
+                        ?: error("Missing SystemUI ClassLoader")
+                check(installHost(host)) { "SystemUI hook restoration failed" }
+                (state["plugins"] as? List<*>)?.filterIsInstance<ClassLoader>()?.forEach {
+                    check(installPlugin(it)) { "Plugin hook restoration failed" }
+                }
+                onMain { restoreEntries(state) }
+            }
+            log(Log.INFO, TAG, "hot reload complete in ${param.processName}")
+        } finally {
+            // Hooks removed from the new version must not keep old code reachable.
+            hooks.finishAdoption()
+        }
+    }
+
+    /** Only framework/host objects and bootstrap collections cross generations. */
+    @Synchronized
+    private fun saveReloadState(): Map<String, Any> {
+        val state = HashMap<String, Any>()
+        hostLoader?.let { state["hostLoader"] = it }
+        serverLoader?.let { state["serverLoader"] = it }
+        settingsContext?.let { state["context"] = it }
+        state["plugins"] = ArrayList(installed)
+        state["style"] = style.value
+        state["height"] = heightPercent
+        val holders = ArrayList<ArrayList<Any>>()
+        for ((holder, entry) in entries) {
+            val row = ArrayList<Any>()
+            row.add(holder)
+            row.add(FrameLayout.LayoutParams(entry.nativeParams))
+            row.add(entry.palette.top)
+            row.add(entry.palette.bottom)
+            row.add(entry.hostVisible)
+            holders.add(row)
+        }
+        state["holders"] = holders
+        return state
+    }
+
+    private fun restoreEntries(state: Map<*, *>) {
+        style = Style.parse(state["style"] as? String)
+        heightPercent = (state["height"] as? Int ?: AppearanceSettings.DEFAULT_HEIGHT_PERCENT)
+                .coerceIn(AppearanceSettings.MIN_HEIGHT_PERCENT, AppearanceSettings.MAX_HEIGHT_PERCENT)
+        for (value in state["holders"] as? List<*> ?: return) {
+            val row = value as? List<*> ?: continue
+            val holder = row.getOrNull(0) ?: continue
+            try {
+                val loader = holder.javaClass.classLoader ?: continue
+                val palette = palettes.getOrPut(loader) { Palette() }
+                palette.top = row[2] as Int
+                palette.bottom = row[3] as Int
+                replace(holder, palette, null,
+                        FrameLayout.LayoutParams(row[1] as FrameLayout.LayoutParams), row[4] as Boolean)
+            } catch (error: Throwable) {
+                report("Cannot restore music island after reload", error)
+            }
+        }
+    }
+
+    private fun currentApplication(): Context =
+            Class.forName("android.app.ActivityThread").getMethod("currentApplication")
+                    .invoke(null) as? Context ?: error("SystemUI application is not ready")
+
+    private fun <T> onMain(action: () -> T): T {
+        if (Looper.myLooper() == Looper.getMainLooper()) return action()
+        val task = FutureTask(action)
+        check(main.post(task)) { "Main looper is shutting down" }
+        return task.get()
+    }
+
+    @Synchronized
+    private fun postUpdate(action: () -> Unit) {
+        if (!hooks.paused) main.post { if (!hooks.paused) action() }
+    }
+
+    @Synchronized
+    private fun inBackground(action: () -> Unit) {
+        if (hooks.paused) return
+        val worker = background ?: Executors.newSingleThreadExecutor().also {
+            background = it
+            workers.removeAll { previous -> previous.isTerminated }
+            workers.add(it)
+        }
+        worker.execute { if (!hooks.paused) action() }
+    }
+
+    private fun setHostVisible(holder: Any, visible: Boolean) {
+        if (hooks.paused) return
+        entries[holder]?.let {
+            it.hostVisible = visible
+            it.view.setHostVisible(visible)
+        }
     }
 
     private fun report(message: String, error: Throwable) {
@@ -427,6 +632,8 @@ class HyperWaveModule : XposedModule() {
             val palette: Palette,
             var nativeParams: FrameLayout.LayoutParams,
     ) {
+        var hostVisible = true
+        val hiddenViews = java.util.IdentityHashMap<View, Int>()
         var artworkIcon: Icon? = null
         var artworkBackdrops: Array<Bitmap?> = arrayOfNulls(2)
         var artworkPrepared = BooleanArray(2)
@@ -439,6 +646,7 @@ class HyperWaveModule : XposedModule() {
     }
 
     private companion object {
+        const val RELOAD_TIMEOUT_MS = 5000L
         const val TAG = "HyperWave"
         const val SYSTEM_UI = "com.android.systemui"
         const val PLUGIN = "miui.systemui.plugin"

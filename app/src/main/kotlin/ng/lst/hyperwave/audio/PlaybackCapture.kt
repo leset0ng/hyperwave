@@ -9,6 +9,8 @@ import android.os.Looper
 import android.os.Process
 import android.util.Log
 import java.lang.reflect.InvocationTargetException
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 
 /** A UID-filtered playback copy. This never redirects the original output. */
 class PlaybackCapture(
@@ -29,7 +31,13 @@ class PlaybackCapture(
     private val thread = Thread(this, "HyperWave-capture-$uid")
 
     fun start() {
-        thread.start()
+        active.add(this)
+        try {
+            thread.start()
+        } catch (error: Throwable) {
+            active.remove(this)
+            throw error
+        }
     }
 
     fun stop() {
@@ -45,6 +53,14 @@ class PlaybackCapture(
     }
 
     override fun run() {
+        try {
+            runSession()
+        } finally {
+            active.remove(this)
+        }
+    }
+
+    private fun runSession() {
         Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
         val manager = context.getSystemService(AudioManager::class.java)
         var captureStarted = false
@@ -173,7 +189,7 @@ class PlaybackCapture(
                     Log.e(TAG, "Cannot unregister audio policy", error)
                 }
             }
-            if (released) onReleased()
+            if (released) onReleased() else cleanupFailed = true
             Log.i(TAG, "capture stopped uid=$uid")
         }
     }
@@ -182,6 +198,23 @@ class PlaybackCapture(
             if (error is InvocationTargetException && error.cause != null) error.cause!! else error
 
     companion object {
+        private val active = ConcurrentHashMap.newKeySet<PlaybackCapture>()
+        @Volatile private var cleanupFailed = false
+
+        /** Also waits for sessions already stopped by a hide/source change. */
+        internal fun stopAllAndAwait(timeoutMillis: Long): Boolean {
+            val sessions = active.toList()
+            sessions.forEach { it.stop() }
+            val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis)
+            for (session in sessions) {
+                val remaining = deadline - System.nanoTime()
+                if (remaining <= 0) return false
+                TimeUnit.NANOSECONDS.timedJoin(session.thread, remaining)
+                if (session.thread.isAlive) return false
+            }
+            return active.isEmpty() && !cleanupFailed
+        }
+
         internal const val RULE_TAG = "ng.lst.hyperwave.capture.48k.v1"
         private const val TAG = "HyperWave"
     }

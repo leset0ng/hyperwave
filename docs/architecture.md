@@ -16,6 +16,8 @@ Kotlin owns the Android integration: module registration, hooks, audio policy se
 ## Module and hooks
 
 - API 102 module registration with `XposedModule.onModuleLoaded` / `onPackageReady`, `hook(...).intercept(...)` and `META-INF/xposed/` configuration. No legacy XposedBridge API. The only Xposed dependency is `compileOnly("io.github.libxposed:api:102.0.0")`.
+- API 102 hot reload is enabled with `autoHotReload=true`. The old generation pauses interceptors, unregisters its settings observer, removes its views while restoring native child visibility, and waits for every capture session and background executor to exit. Saved state uses bootstrap collections and host/framework objects only. The new generation explicitly reinstalls capture and plugin-loader hooks, atomically replaces matching executable/ID pairs through `HookHandle.replaceHook`, unhooks obsolete handles, and recreates existing music-island views. Initial load and package callbacks are not replayed by the framework.
+- Native hot reload loads a distinct read-only file copy per new ClassLoader from SystemUI's device-protected code cache. A generation deletes only its own copy after its JNI work exits; ART retains responsibility for library unloading. See `hot-reload.md` for migration and validation limits.
 - SystemUI handles UID audio loopback and drawing; system_server only relaxes the 48 kHz Float32 privileged capture format check for the module-tagged music loopback, keeping its original permission validation.
 - Scopes: `com.android.systemui` and the system framework `system` (system_server).
 - SystemUI plugin `ClassLoader` discovery for `MIUISystemUIPlugin`.

@@ -43,6 +43,7 @@ class WaveformView(context: Context) : View(context), Choreographer.FrameCallbac
     private var fallbackVariant = 0
     private var playing = false
     private var hostVisible = true
+    private var disposed = false
     private var scheduled = false
     private var unavailable = false
     private var sourceUid = -1
@@ -133,8 +134,17 @@ class WaveformView(context: Context) : View(context), Choreographer.FrameCallbac
         invalidate()
     }
 
+    /** Permanently retires this generation's view and its queued callbacks. */
+    internal fun dispose() {
+        disposed = true
+        hostVisible = false
+        stopCapture()
+        main.removeCallbacksAndMessages(null)
+        setArtwork(null)
+    }
+
     private fun active(): Boolean =
-            hostVisible && isAttachedToWindow && windowVisibility == VISIBLE && isShown
+            !disposed && hostVisible && isAttachedToWindow && windowVisibility == VISIBLE && isShown
 
     private fun reconcileCapture() {
         if (!active()) return

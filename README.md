@@ -40,14 +40,15 @@ Gradle 会自动运行 `scripts/build-rust.sh`，把 Rust `.so` 打进 APK。NDK
 ## 安装
 
 1. 安装 APK，在 LSPosed 中启用 HyperWave，勾选**系统界面**与**系统框架**两个作用域。系统进程的作用域标识是 `system`，不是 `android`。
-2. 首次启用系统框架作用域、或更新了它的 Hook 后，重启设备。系统框架里的 Hook 只有重启才能更新，重启系统界面不够。
+2. 首次启用作用域，或从不支持热重载的旧版升级时，重启设备。支持热重载的版本运行后，更新 APK 会通过 API 102 请求各目标进程替换 Hook，无需常规重启；需要框架实现 API 102 的热重载能力。
 3. 打开 HyperWave 选择外观，用“频谱高度”滑块调整柱高（50%–200%，默认 150%）。设置自动保存并实时生效。
 4. 播放音乐并回到桌面，波形开始跟随音频。
 
-桌面入口可以在设置里隐藏，需要时从 LSPosed 的模块页面进入设置。停用或卸载后同样需要重启，才能退出已注入 `system_server` 与 SystemUI 的代码。
+桌面入口可以在设置里隐藏，需要时从 LSPosed 的模块页面进入设置。热重载会停止旧代采集、释放旧 View 与监听器，并在新代恢复现有音乐岛；旧线程未能退出时会拒绝本次重载。框架不支持、拒绝或重载失败时，仍需重启相应进程；涉及 `system_server` 时重启设备。停用或卸载后同样需要重启，才能退出已注入 `system_server` 与 SystemUI 的代码。详见 `docs/hot-reload.md`。
 
 ## 文档
 
+- `docs/hot-reload.md` — API 102 热重载、首次升级与验证范围
 - `docs/architecture.md` — 音频链路、Hook 设计、DSP 与三种外观的绘制实现
 - `docs/compatibility.md` — 已验证环境、兼容性与 MVP 边界
 - `docs/validation.md` — 验证结论、golden vectors、日志抓取

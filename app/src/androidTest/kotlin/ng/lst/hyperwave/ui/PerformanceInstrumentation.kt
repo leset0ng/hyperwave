@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
 import ng.lst.hyperwave.audio.NativeDsp
+import ng.lst.hyperwave.audio.NativeReloadCheck
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.Random
@@ -20,15 +21,23 @@ import java.util.concurrent.atomic.AtomicReference
 class PerformanceInstrumentation : Instrumentation() {
     private val results = Bundle()
     private var captureArguments: Bundle? = null
+    private var nativeReload = false
 
     override fun onCreate(arguments: Bundle?) {
         super.onCreate(arguments)
         captureArguments = arguments?.takeIf { it.containsKey("capture_policy") }
+        nativeReload = arguments?.getString("native_reload") == "true"
         start()
     }
 
     override fun onStart() {
         try {
+            if (nativeReload) {
+                NativeReloadCheck.verify(targetContext)
+                results.putString("checks", "PASS: three native reload generations, JNI calls, copy cleanup")
+                finish(Activity.RESULT_OK, results)
+                return
+            }
             val capture = captureArguments
             if (capture != null) {
                 runCaptureSource(capture)
