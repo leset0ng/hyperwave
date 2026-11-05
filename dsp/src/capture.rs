@@ -125,7 +125,7 @@ mod android {
     }
 
     #[no_mangle]
-    pub extern "system" fn Java_dev_hyperwave_audio_NativeDsp_capture<'local>(
+    pub extern "system" fn Java_ng_lst_hyperwave_audio_NativeDsp_capture<'local>(
         mut env: JNIEnv<'local>,
         _class: JClass<'local>,
         record: JObject<'local>,

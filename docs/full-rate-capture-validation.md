@@ -4,16 +4,16 @@ Validated on 2026-11-05 using `emulator-5580` (hongkong, HyperOS / Android 17 AP
 
 ## Problem and implementation
 
-The physical phone's Spotify stream had effective audio flags `0x600`, including `FLAG_NO_MEDIA_PROJECTION` (`0x400`). Hyperwave's original non-privileged 48 kHz loopback registered successfully but received zero PCM. The existing implementation treated those buffers as valid silence, leaving the bars at their minimum heights.
+The physical phone's Spotify stream had effective audio flags `0x600`, including `FLAG_NO_MEDIA_PROJECTION` (`0x400`). HyperWave's original non-privileged 48 kHz loopback registered successfully but received zero PCM. The existing implementation treated those buffers as valid silence, leaving the bars at their minimum heights.
 
 The module now requests privileged playback capture while keeping its existing 48,000 Hz mono Float32 reader, 4096-frame blocks, JNI and Rust DSP. There is no added 16 kHz capture or resampling stage.
 
-Android normally restricts privileged capture to <=16 kHz mono linear PCM with <=2 bytes/sample. Hyperwave hooks the format validator in SystemUI and system_server, but only within a synchronous operation matching all of these conditions:
+Android normally restricts privileged capture to <=16 kHz mono linear PCM with <=2 bytes/sample. HyperWave hooks the format validator in SystemUI and system_server, but only within a synchronous operation matching all of these conditions:
 
 - SystemUI is the caller; system_server resolves and checks the actual SystemUI UID.
 - The mix is a player mix using `RENDER | LOOP_BACK`.
 - Exactly two inclusion criteria match one application UID and `USAGE_MEDIA`.
-- The media rule contains only the `dev.hyperwave.capture.48k.v1` tag.
+- The media rule contains only the `ng.lst.hyperwave.capture.48k.v1` tag.
 - Privileged media capture is requested; voice communication capture is not.
 - The format is exactly 48 kHz, mono output channel mask, Float32.
 - The validator receives the same format object that was inspected on the current thread.
@@ -56,15 +56,15 @@ adb -s emulator-5580 install -r app/build/outputs/apk/debug/app-debug.apk
 adb -s emulator-5580 install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 
 adb -s emulator-5580 shell am instrument -w -e capture_policy 2 -e test_frequency 10000 \
-  dev.hyperwave.test/dev.hyperwave.ui.PerformanceInstrumentation
+  ng.lst.hyperwave.test/ng.lst.hyperwave.ui.PerformanceInstrumentation
 adb -s emulator-5580 shell am instrument -w -e capture_policy 2 -e test_frequency 9500 \
-  dev.hyperwave.test/dev.hyperwave.ui.PerformanceInstrumentation
+  ng.lst.hyperwave.test/ng.lst.hyperwave.ui.PerformanceInstrumentation
 adb -s emulator-5580 shell am instrument -w -e capture_policy 3 -e test_frequency 9500 \
-  dev.hyperwave.test/dev.hyperwave.ui.PerformanceInstrumentation
+  ng.lst.hyperwave.test/ng.lst.hyperwave.ui.PerformanceInstrumentation
 adb -s emulator-5580 shell am instrument -w -e capture_policy 1 \
-  dev.hyperwave.test/dev.hyperwave.ui.PerformanceInstrumentation
+  ng.lst.hyperwave.test/ng.lst.hyperwave.ui.PerformanceInstrumentation
 
-adb -s emulator-5580 logcat -d -v threadtime Hyperwave:I '*:S'
+adb -s emulator-5580 logcat -d -v threadtime HyperWave:I '*:S'
 adb -s emulator-5580 shell dumpsys media.audio_policy
 ```
 

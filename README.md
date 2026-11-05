@@ -1,4 +1,4 @@
-# Hyperwave
+# HyperWave
 
 将 HyperOS 音乐超级岛右侧的预制动画替换为音频驱动波形，可在设置页选择 iOS 六柱、HyperOS 原生五柱，或结合六柱与 HyperOS 渐变的 MiOS 外观。
 
@@ -47,14 +47,14 @@ dependencies {
 
 ## Install and use
 
-1. 安装 APK，在 LSPosed 中启用 **Hyperwave**，确认推荐作用域 **系统界面 / com.android.systemui** 和 **系统框架 / system** 均已勾选。现代模块的系统进程作用域标识为 `system`，不是 `android`。
+1. 安装 APK，在 LSPosed 中启用 **HyperWave**，确认推荐作用域 **系统界面 / com.android.systemui** 和 **系统框架 / system** 均已勾选。现代模块的系统进程作用域标识为 `system`，不是 `android`。
 2. 首次启用系统框架作用域或更新其 Hook 后，重启设备或模拟器，让新模块进入 system_server 与 SystemUI。仅重启系统界面无法更新 system_server 中的 Hook。
-3. 打开 Hyperwave，选择“iOS”、“HyperOS”或“MiOS”外观，通过“频谱高度”滑块调整所有外观的播放柱高（50%–200%，默认 150%）。设置自动保存并实时应用，无需重启系统界面。默认选择 HyperOS。
+3. 打开 HyperWave，选择“iOS”、“HyperOS”或“MiOS”外观，通过“频谱高度”滑块调整所有外观的播放柱高（50%–200%，默认 150%）。设置自动保存并实时应用，无需重启系统界面。默认选择 HyperOS。
 4. 播放音乐并回到桌面。模块接管 `musicWave` / `musicPause` 图标，保留 HyperOS 原有岛容器、封面和点击行为。
 
-应用提供外观、频谱高度和“隐藏桌面入口”设置。打开“隐藏桌面入口”后，可从 LSPosed 的 Hyperwave 模块页面打开设置，关闭开关即可恢复桌面图标；隐藏状态会保留，不影响模块运行。桌面图标的变化可能需要等待桌面刷新。合成音源位于 `androidTest`，供设备音频捕获回归验证使用。
+应用提供外观、频谱高度和“隐藏桌面入口”设置。打开“隐藏桌面入口”后，可从 LSPosed 的 HyperWave 模块页面打开设置，关闭开关即可恢复桌面图标；隐藏状态会保留，不影响模块运行。桌面图标的变化可能需要等待桌面刷新。合成音源位于 `androidTest`，供设备音频捕获回归验证使用。
 
-停用：在 LSPosed 中禁用 Hyperwave 并重启设备或模拟器。卸载应用后也需要重启，才能退出已注入 system_server 与 SystemUI 的代码。
+停用：在 LSPosed 中禁用 HyperWave 并重启设备或模拟器。卸载应用后也需要重启，才能退出已注入 system_server 与 SystemUI 的代码。
 
 ## Implemented
 
@@ -103,7 +103,7 @@ native 读取循环的分块、取消与模拟器回归见 `docs/native-capture-
 性能优化的数值回归、设备配对计时和复现命令见 `docs/performance-validation.md`。封面亮度与模糊在 Rust 中批量处理，仅在 iOS 外观按需生成；连续圆角复用对称采样和不变路径；生产 DSP 只计算六频段使用的幅值，测试保留完整频谱检查。
 
 ```sh
-adb -s emulator-5580 logcat -s Hyperwave
+adb -s emulator-5580 logcat -s HyperWave
 adb -s emulator-5580 shell 'su -c "/data/adb/modules/zygisk_lsposed/lspctl status"'
 ```
 

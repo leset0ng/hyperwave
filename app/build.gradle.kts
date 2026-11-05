@@ -1,15 +1,15 @@
 plugins { id("com.android.application") }
 
 android {
-    namespace = "dev.hyperwave"
+    namespace = "ng.lst.hyperwave"
     compileSdk = 37
     defaultConfig {
-        applicationId = "dev.hyperwave"
+        applicationId = "ng.lst.hyperwave"
         minSdk = 33
         targetSdk = 37
         versionCode = 1
         versionName = "0.1.0"
-        testInstrumentationRunner = "dev.hyperwave.ui.PerformanceInstrumentation"
+        testInstrumentationRunner = "ng.lst.hyperwave.ui.PerformanceInstrumentation"
         ndk { abiFilters += "arm64-v8a" }
     }
     compileOptions {

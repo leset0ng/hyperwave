@@ -20,7 +20,7 @@ ANDROID_HOME="$HOME/Library/Android/sdk" \
 android install --device=emulator-5580 --apks=app/build/outputs/apk/debug/app-debug.apk
 android install --device=emulator-5580 --apks=app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 adb -s emulator-5580 shell am instrument -w \
-  dev.hyperwave.test/dev.hyperwave.ui.PerformanceInstrumentation
+  ng.lst.hyperwave.test/ng.lst.hyperwave.ui.PerformanceInstrumentation
 ```
 
 The device runner returns `INSTRUMENTATION_CODE: -1` and a `checks=PASS` result on success. A failure returns code 0 with a failure stack trace. It runs in the app test process; it does not restart SystemUI or reload the injected module. `ReferenceArtwork` and `ReferenceCorners` retain the old algorithms exclusively in the test APK, for paired comparisons on the same runtime.

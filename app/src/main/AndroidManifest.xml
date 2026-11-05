@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application android:label="Hyperwave" android:theme="@android:style/Theme.Material.NoActionBar" android:allowBackup="false" android:supportsRtl="true">
+    <application android:label="HyperWave" android:theme="@android:style/Theme.Material.NoActionBar" android:allowBackup="false" android:supportsRtl="true">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -15,7 +15,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity-alias>
-        <provider android:name=".AppearanceProvider" android:authorities="dev.hyperwave.settings"
+        <provider android:name=".AppearanceProvider" android:authorities="ng.lst.hyperwave.settings"
             android:exported="true" android:directBootAware="true" />
     </application>
 </manifest>

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Hyperwave</string>
-    <string name="setup_instructions">在 LSPosed 中启用 Hyperwave，选择系统界面作用域，首次启用后重启系统界面。</string>
+    <string name="app_name">HyperWave</string>
+    <string name="setup_instructions">在 LSPosed 中启用 HyperWave，选择系统界面作用域，首次启用后重启系统界面。</string>
     <string name="appearance_title">外观</string>
     <string name="appearance_ios">iOS\n六柱、连续圆角与封面着色</string>
     <string name="appearance_hyperos">HyperOS\n沿用系统柱形与封面渐变</string>

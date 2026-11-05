@@ -75,15 +75,15 @@ adb -s emulator-5580 shell wm dismiss-keyguard
 adb -s emulator-5580 shell input keyevent KEYCODE_HOME
 
 adb -s emulator-5580 shell am instrument -w \
-  dev.hyperwave.test/dev.hyperwave.ui.PerformanceInstrumentation
+  ng.lst.hyperwave.test/ng.lst.hyperwave.ui.PerformanceInstrumentation
 adb -s emulator-5580 shell am instrument -w -e capture_policy 1 \
-  dev.hyperwave.test/dev.hyperwave.ui.PerformanceInstrumentation
+  ng.lst.hyperwave.test/ng.lst.hyperwave.ui.PerformanceInstrumentation
 adb -s emulator-5580 shell am instrument -w -e capture_policy 2 -e test_frequency 9500 \
-  dev.hyperwave.test/dev.hyperwave.ui.PerformanceInstrumentation
+  ng.lst.hyperwave.test/ng.lst.hyperwave.ui.PerformanceInstrumentation
 adb -s emulator-5580 shell am instrument -w -e capture_policy 3 -e test_frequency 9500 \
-  dev.hyperwave.test/dev.hyperwave.ui.PerformanceInstrumentation
+  ng.lst.hyperwave.test/ng.lst.hyperwave.ui.PerformanceInstrumentation
 
-adb -s emulator-5580 logcat -d -v threadtime Hyperwave:I '*:S'
+adb -s emulator-5580 logcat -d -v threadtime HyperWave:I '*:S'
 adb -s emulator-5580 shell dumpsys media.audio_policy
 ```
 
