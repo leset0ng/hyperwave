@@ -1,27 +1,27 @@
 # HyperWave
 
-将 HyperOS 音乐超级岛右侧的预制动画替换为音频驱动波形，可在设置页选择 iOS 六柱、HyperOS 原生五柱，或结合六柱与 HyperOS 渐变的 MiOS 外观。
+让 HyperOS 音乐超级岛的波形，跟着你正在听的歌跳动。
 
-这是基于 **libxposed API 102** 的 LSPosed MVP，Android 接入层使用 Kotlin，DSP 使用 Rust。Android 工程直接位于本仓库根目录。
+HyperWave 是一个 LSPosed 模块，把音乐超级岛右侧的预制动画换成音频驱动的实时频谱。三种外观可选：iOS 六柱、HyperOS 原生五柱，以及结合六柱几何与 HyperOS 渐变的 MiOS。
+
+- **真实频谱**：48 kHz 单声道 Float32 系统级回环，Rust 侧 FFT 分析，六频段实时映射到柱高
+- **三种外观**：iOS / HyperOS / MiOS，设置里实时切换，无需重启系统界面
+- **原生交互不变**：岛容器、封面、点击行为全部沿用 HyperOS，只替换波形图标
 
 ```text
-SystemUI / MIUISystemUIPlugin
-    → musicWave / musicPause hooks
-    → UID-filtered AudioPolicy + AudioRecord
-    → 48 kHz mono Float32, native direct-buffer read loop, 4096-frame blocks
-    → Rust Hann + FFT + six-band response → JNI six-bar delivery
-    → Canvas geometry (iOS / MiOS six bars / native HyperOS five bars) + interruptible transitions
+音乐播放 → UID 过滤的 AudioRecord 回环 → Rust FFT → 六柱值 → Canvas 绘制
 ```
 
-## Requirements
+Android 接入层使用 Kotlin，DSP 使用 Rust，基于 **libxposed API 102**，Android 工程直接位于仓库根目录。
 
-当前验证目标：hongkong AVD，HyperOS `OS4.0.24.0.XFRCNXM` / Android 17 API 37 / arm64，LSPosed `2.2.1 (7930)`，运行时 Xposed API `102`。
+## 环境要求
 
-模块作用于 `com.android.systemui` 和系统框架 `system`（system_server）。SystemUI 负责 UID 音频回环与绘图；system_server 仅为模块标记的音乐回环放行 48 kHz Float32 privileged capture 格式检查，保留原有权限校验。其他 HyperOS 版本的类名、模板和音频策略可能不同，尚未验证。
+- HyperOS 设备，已安装 LSPosed，运行时 Xposed API 102
+- 作用域：**系统界面 / `com.android.systemui`** 与 **系统框架 / `system`**
 
-开发环境：JDK 21、Android SDK 37、Android NDK `30.0.15729638`、Rust stable 和 `aarch64-linux-android` target。
+当前验证目标为 Android 17 (API 37) arm64 的 HyperOS `OS4.0.24.0.XFRCNXM`，其他版本尚未验证。详见 `docs/compatibility.md`。
 
-## Build
+## 构建
 
 ```sh
 rustup target add aarch64-linux-android
@@ -33,83 +33,27 @@ export ANDROID_HOME="$HOME/Library/Android/sdk"
 ./gradlew :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
 ```
 
-Gradle 自动运行 `scripts/build-rust.sh`，将 Rust `.so` 放入 APK。可通过 `ANDROID_NDK_HOME` 指定 NDK 路径，通过 `ANDROID_SDK_ROOT` 或 `ANDROID_HOME` 指定 SDK。
+Gradle 会自动运行 `scripts/build-rust.sh`，把 Rust `.so` 打进 APK。NDK 路径可用 `ANDROID_NDK_HOME` 指定，SDK 用 `ANDROID_SDK_ROOT` 或 `ANDROID_HOME`。产物在 `app/build/outputs/apk/debug/app-debug.apk`。
 
-产物：`app/build/outputs/apk/debug/app-debug.apk`。
+需要 JDK 21、Android SDK 37、Android NDK `30.0.15729638`、Rust stable 与 `aarch64-linux-android` target。
 
-```kotlin
-dependencies {
-    compileOnly("io.github.libxposed:api:102.0.0")
-}
-```
+## 安装
 
-模块使用 `XposedModule.onModuleLoaded` / `onPackageReady`、`hook(...).intercept(...)` 和 `META-INF/xposed/` 配置，没有使用 legacy XposedBridge API。
+1. 安装 APK，在 LSPosed 中启用 HyperWave，勾选**系统界面**与**系统框架**两个作用域。系统进程的作用域标识是 `system`，不是 `android`。
+2. 首次启用系统框架作用域、或更新了它的 Hook 后，重启设备。系统框架里的 Hook 只有重启才能更新，重启系统界面不够。
+3. 打开 HyperWave 选择外观，用“频谱高度”滑块调整柱高（50%–200%，默认 150%）。设置自动保存并实时生效。
+4. 播放音乐并回到桌面，波形开始跟随音频。
 
-## Install and use
+桌面入口可以在设置里隐藏，需要时从 LSPosed 的模块页面进入设置。停用或卸载后同样需要重启，才能退出已注入 `system_server` 与 SystemUI 的代码。
 
-1. 安装 APK，在 LSPosed 中启用 **HyperWave**，确认推荐作用域 **系统界面 / com.android.systemui** 和 **系统框架 / system** 均已勾选。现代模块的系统进程作用域标识为 `system`，不是 `android`。
-2. 首次启用系统框架作用域或更新其 Hook 后，重启设备或模拟器，让新模块进入 system_server 与 SystemUI。仅重启系统界面无法更新 system_server 中的 Hook。
-3. 打开 HyperWave，选择“iOS”、“HyperOS”或“MiOS”外观，通过“频谱高度”滑块调整所有外观的播放柱高（50%–200%，默认 150%）。设置自动保存并实时应用，无需重启系统界面。默认选择 HyperOS。
-4. 播放音乐并回到桌面。模块接管 `musicWave` / `musicPause` 图标，保留 HyperOS 原有岛容器、封面和点击行为。
+## 文档
 
-应用提供外观、频谱高度和“隐藏桌面入口”设置。打开“隐藏桌面入口”后，可从 LSPosed 的 HyperWave 模块页面打开设置，关闭开关即可恢复桌面图标；隐藏状态会保留，不影响模块运行。桌面图标的变化可能需要等待桌面刷新。合成音源位于 `androidTest`，供设备音频捕获回归验证使用。
+- `docs/architecture.md` — 音频链路、Hook 设计、DSP 与三种外观的绘制实现
+- `docs/compatibility.md` — 已验证环境、兼容性与 MVP 边界
+- `docs/validation.md` — 验证结论、golden vectors、日志抓取
+- `docs/full-rate-capture-validation.md`、`docs/native-capture-validation.md`、`docs/performance-validation.md` — 各专题的实测记录与复现命令
 
-停用：在 LSPosed 中禁用 HyperWave 并重启设备或模拟器。卸载应用后也需要重启，才能退出已注入 system_server 与 SystemUI 的代码。
-
-## Implemented
-
-- API 102 模块注册、SystemUI 与系统框架作用域、SystemUI 插件 ClassLoader 发现。
-- 两个进程协同放行带专用标记、单个应用 UID、仅 `USAGE_MEDIA`、`RENDER | LOOP_BACK` 的 48 kHz mono Float32 privileged capture；格式例外仅在当前线程的匹配操作内生效，system_server 同时核对调用者为 SystemUI。
-- 仅替换音乐模板的动画，跳过其他事件及投放静态图标。
-- 按播放器 UID 与 `USAGE_MEDIA` 匹配的回环采集，`RENDER | LOOP_BACK` 保留原播放输出。
-- 48 kHz mono Float32 → Rust 直接缓冲区读取循环与 4096-frame 拼块 → Rust DSP → 六柱；PCM 不进入 Java 数组，仅六柱结果通过 JNI 回传。AudioPolicy 配置与 AudioRecord 生命周期仍由 Kotlin 管理，Rust 通过 JNI 调用 AudioRecord 的直接 ByteBuffer 读取接口。
-- 每个采集会话独立持有 PCM 和 FFT 工作区；停止时由 AudioRecord.stop() 解除阻塞读取，读取返回后检查停止状态，再释放录音器并注销策略。
-- 前 2048 样本周期 Hann + 2048 零填充、FFT 尺度与 packed DC/Nyquist、六个实际 bin 分组、幅值求和和非线性映射。
-- 对目标几何做 80 ms ease-out，从当前显示状态接续；暂停使用独立 900 ms 过渡。
-- 视图隐藏、移除和播放源切换时停止采集；失效 session 的更新不会写入新视图状态。
-- 系统级采集初始化失败时，释放已创建的录音器并注销策略，再以旧的普通捕获规则重试一次；两次均保持 UID 过滤、`USAGE_MEDIA`、48 kHz mono Float32。两条路径都失败才播放对应外观的 fallback；已开始采集后的读流/DSP 错误不触发旧路径重试。正常采集到零值时显示低柱。fallback 退出时保留当前显示几何，接续暂停或实时动画。
-- iOS 外观：六柱、实时 `5S/48` 基础宽、预制 `S/8` 基础宽、动态增粗和圆角像素取整；封面采用 HSP 亮度处理、饱和度、明暗 scrim、模糊，再以柱形遮罩合成。
-- iOS fallback：三种真实轨迹排列、2.66 秒循环、非均匀 keyTimes 的三次 Hermite 插值，第六柱保持最低高度。插值公式经本机公开 QuartzCore presentation 采样核对。
-- HyperOS 外观：五柱、固定柱宽与圆角，继承原 Lottie View/Stub 的尺寸、margin 和 gravity。48 kHz 六个 DSP 频段重采样至五个显示柱；无额外改变 DSP 公式。fallback 使用原生 `music_wave` 的高度和渐变轨迹，暂停采用原生高度与反向渐变。
-- MiOS 外观：沿用 iOS 六柱几何、连续圆角、动态增粗和 fallback，采用 HyperOS 原生封面上下渐变及其透明度；渐变覆盖每根柱高，暂停时反向。
-- Hook 原生 `IslandIconViewHolder.getLottieColor(Bitmap)`，读取返回的上下渐变色并原样保留返回值；HyperOS 与 MiOS 模式保留系统取色及 60% 不透明度，颜色和外观更新均不重启采集。
-- 设置保存在设备保护存储，通过只读 ContentProvider 和 ContentObserver 同步到 SystemUI；读取和封面处理在后台执行。
-
-## MVP boundaries
-
-- iOS 外观按当前逆向规格重建。连续圆角使用 macOS QuartzCore 离屏采样轮廓及插值，模糊使用 Android 端的 Gaussian 近似；Apple 的内部工作色域、模糊核和 iOS 真机合成细节未验证，不能声称逐像素一致。
-- iOS fallback cubic 已以本机 macOS 公开 QuartzCore API 的 756 个 presentation 采样点验证；iOS 系统宿主的安装全局相位与实际状态时序仍未验证。
-- HyperOS 实时高度在原生动画范围内响应音频，渐变范围随高度映射到原生端点范围；fallback 保留独立的高度/渐变时间曲线。原生 path 关键帧中的亚像素中心微移未单独复刻。
-- buffering pulse 仍未接入独立的宿主状态。
-- 48 kHz 系统级回环可接收 `ALLOW_CAPTURE_BY_SYSTEM` 音轨，依赖两端 Hook 均加载；Hook 缺失或初始化被拒绝时，自动重试旧的普通 48 kHz Float32 捕获，不降低采样率。旧路径仍受播放器策略限制，Spotify 等仅允许系统捕获的音轨可能返回全零；此时显示低柱，不播放预制动画。`ALLOW_CAPTURE_BY_NONE` 仍由 native 音频策略排除；全零 PCM 无法单独区分真实静音和被策略排除。模块不会据此伪造实时频谱，也不会自动降为全局混音。
-- 该路径针对内部格式校验进行受限 Hook，超出 Android 标准 privileged capture 的 16 kHz 格式约束；其他 ROM 的实现和兼容性需要实测。DSP 与读取端保持 48 kHz Float32，没有新增 16 kHz 或升采样路径。
-- UID 过滤不是 iOS 的 PID tap，同 UID 的媒体流可能被合并。蓝牙、远程投放、受保护内容、多用户和各音乐应用兼容性尚未全面测试。
-- 当前宿主内运行 DSP；native 崩溃会影响 SystemUI。JNI 已检查块长度、处理非有限值并拦截 Rust unwind。
-
-## Validation and debugging
-
-48 kHz 系统级捕获的模拟器验证、9.5/10 kHz 高频输入、捕获策略边界与复现命令见 `docs/full-rate-capture-validation.md`。该验证使用合成音轨复现 Spotify 的系统级捕获限制，尚未验证 Spotify 在真机上的修复效果。
-
-已在上述 AVD 实测 API 102 模块加载、native 加载、UID 过滤采集、六个测试频段的非零响应、实际岛内绘图和测试结束后的 AudioPolicy 注销。当前 AVD 已安装并启用模块。实测记录与录屏索引见 `hyperos-re/mvp-validation.md`。
-
-原生取色接入后，`:app:assembleDebug :app:lintDebug` 通过；在同一 AVD 更新模块并重新加载 SystemUI，日志确认取得多组带 `0x99` alpha 的原生颜色返回值，截图确认岛内六柱显示封面渐变色，音频采集和实时波形继续工作。
-
-`dsp/tests/data/pcm-golden-vectors.json` 来自本仓库 iOS 逆向的七组数值参考输入，保留原始 scope 字段。这些向量是重建的 Accelerate pipeline 结果，不是 Apple 音乐 UI 的动态录制。Rust 测试检查全部 2048 个幅值与六柱值，并额外检查半窗、分段边界、错误长度和非有限输入。
-
-Android lint 的内部 API 反射、动态 native 库加载和单 arm64 支持警告与模块的实现方式有关；lint 没有错误。
-
-native 读取循环的分块、取消与模拟器回归见 `docs/native-capture-validation.md`。
-
-性能优化的数值回归、设备配对计时和复现命令见 `docs/performance-validation.md`。封面亮度与模糊在 Rust 中批量处理，仅在 iOS 外观按需生成；连续圆角复用对称采样和不变路径；生产 DSP 只计算六频段使用的幅值，测试保留完整频谱检查。
-
-```sh
-adb -s emulator-5580 logcat -s HyperWave
-adb -s emulator-5580 shell 'su -c "/data/adb/modules/zygisk_lsposed/lspctl status"'
-```
-
-模块加载、插件 Hook 信息同时写入 LSPosed 模块日志。音频日志包含目标 UID、采样格式、块峰值和六柱数值，不保存原始音频。
-
-## Layout
+## 目录结构
 
 ```text
 app/            Android app, modern Xposed entry, capture and renderer
@@ -117,8 +61,9 @@ app/            Android app, modern Xposed entry, capture and renderer
 dsp/            Rust DSP + JNI entry + numerical reference tests
 scripts/        Native build script
 gradle/         Gradle wrapper
+docs/           Architecture, compatibility and validation records
 hyperos-re/     APK samples, decompilation and AVD validation evidence (local)
 ios-re/         Existing Apple algorithm and rendering research (local)
 ```
 
-HyperOS 调查与动态验证记录继续保存在 `hyperos-re/`。原始 iOS/HyperOS 样本及反编译产物不参与 APK 编译；DSP 数值测试使用独立复制的参考向量。
+`hyperos-re/` 与 `ios-re/` 中的原始样本和反编译产物不参与 APK 编译；DSP 数值测试使用独立复制的参考向量。
