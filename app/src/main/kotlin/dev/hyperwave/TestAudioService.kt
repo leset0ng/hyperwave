@@ -23,7 +23,7 @@ import android.os.IBinder
 import android.os.SystemClock
 import android.util.Log
 
-/** Controlled capture-friendly media source; never reads a microphone or user file. */
+/** Controlled media source; capture-policy variants are exercised by instrumentation. */
 class TestAudioService : Service() {
     private lateinit var session: MediaSession
 
@@ -84,21 +84,26 @@ class TestAudioService : Service() {
                     .setActions(PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_STOP)
                     .setState(PlaybackState.STATE_PLAYING, 0, 1f, SystemClock.elapsedRealtime()).build())
             session.isActive = true
-            val thread = Thread({ play() }, "Hyperwave-test-audio")
+            val policy = intent?.getIntExtra("capture_policy", AudioAttributes.ALLOW_CAPTURE_BY_ALL)
+                    ?: AudioAttributes.ALLOW_CAPTURE_BY_ALL
+            val frequency = intent?.getDoubleExtra("test_frequency", 0.0) ?: 0.0
+            val thread = Thread({ play(policy, frequency) }, "Hyperwave-test-audio")
             worker = thread
             thread.start()
         }
         return START_NOT_STICKY
     }
 
-    private fun play() {
+    private fun play(capturePolicy: Int, testFrequency: Double) {
         var current: AudioTrack? = null
         try {
             val manager = getSystemService(AudioManager::class.java)
-            manager.setAllowedCapturePolicy(AudioAttributes.ALLOW_CAPTURE_BY_ALL)
+            require(capturePolicy in AudioAttributes.ALLOW_CAPTURE_BY_ALL..AudioAttributes.ALLOW_CAPTURE_BY_NONE)
+            require(testFrequency == 0.0 || testFrequency in 20.0..20000.0)
+            manager.setAllowedCapturePolicy(capturePolicy)
             val attrs = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .setAllowedCapturePolicy(AudioAttributes.ALLOW_CAPTURE_BY_ALL).build()
+                    .setAllowedCapturePolicy(capturePolicy).build()
             val audio = AudioTrack.Builder().setAudioAttributes(attrs)
                     .setAudioFormat(AudioFormat.Builder().setSampleRate(48000)
                             .setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
@@ -108,12 +113,13 @@ class TestAudioService : Service() {
             track = audio
             if (!running) return
             audio.play()
+            Log.i("Hyperwave", "test playback policy=$capturePolicy 48000Hz float32 frequency=$testFrequency")
             val samples = FloatArray(2400)
             var phase = 0.0
             var offset = 0L
             while (running && offset < 48000L * 60) {
                 val band = (offset / 96000).toInt() % FREQUENCIES.size
-                val frequency = FREQUENCIES[band]
+                val frequency = if (testFrequency > 0.0) testFrequency else FREQUENCIES[band]
                 for (i in samples.indices) {
                     val envelope = 0.035 * (1 + Math.sin((offset + i) / 48000.0 * Math.PI))
                     samples[i] = (envelope * Math.sin(phase)).toFloat()

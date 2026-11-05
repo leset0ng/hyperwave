@@ -47,6 +47,39 @@ class PlaybackCapture(
     override fun run() {
         Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
         val manager = context.getSystemService(AudioManager::class.java)
+        var captureStarted = false
+        var attemptCleanedUp = false
+        try {
+            runCaptureWithFallback(
+                    isStopped = { stopped },
+                    canRetry = { !captureStarted && attemptCleanedUp },
+                    capture = { privileged ->
+                        attemptCleanedUp = false
+                        captureAttempt(manager, privileged,
+                                onStarted = { captureStarted = true },
+                                onReleased = { attemptCleanedUp = true })
+                    },
+                    onFallback = { error ->
+                        val cause = captureCause(error)
+                        Log.w(TAG, "privileged capture rejected uid=$uid; retrying legacy 48000Hz mono float32", cause)
+                    },
+            )
+        } catch (error: Throwable) {
+            val cause = captureCause(error)
+            if (!stopped) {
+                Log.e(TAG, "capture unavailable uid=$uid", cause)
+                listener.onUnavailable(cause.javaClass.simpleName + ": " + cause.message)
+            }
+        }
+    }
+
+    private fun captureAttempt(
+            manager: AudioManager,
+            privileged: Boolean,
+            onStarted: () -> Unit,
+            onReleased: () -> Unit,
+    ) {
+        if (stopped) return
         var policy: Any? = null
         lateinit var policyClass: Class<*>
         var registered = false
@@ -56,13 +89,18 @@ class PlaybackCapture(
             val ruleBuilder = ruleBuilderClass.getConstructor().newInstance()
             ruleBuilderClass.getMethod("setTargetMixRole", Int::class.java).invoke(ruleBuilder, 0)
             ruleBuilderClass.getMethod("addMixRule", Int::class.java, Any::class.java).invoke(ruleBuilder, 4, uid)
-            val attributes = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).build()
+            val attributesBuilder = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
+            if (privileged) {
+                AudioAttributes.Builder::class.java.getMethod("addTag", String::class.java)
+                        .invoke(attributesBuilder, RULE_TAG)
+            }
+            val attributes = attributesBuilder.build()
             ruleBuilderClass.getMethod("addRule", AudioAttributes::class.java, Int::class.java)
                     .invoke(ruleBuilder, attributes, 1)
-            // Privileged=true restricts capture to <=16kHz PCM16. Keep the 48kHz
-            // path explicit, with normal playback capture policy restrictions.
+            // Try the marked system path first, then the original unprivileged rules.
+            // Both attempts retain the same 48kHz Float32 recording format.
             ruleBuilderClass.getMethod("allowPrivilegedPlaybackCapture", Boolean::class.java)
-                    .invoke(ruleBuilder, false)
+                    .invoke(ruleBuilder, privileged)
             val rule = ruleBuilderClass.getMethod("build").invoke(ruleBuilder)
 
             val mixClass = Class.forName("android.media.audiopolicy.AudioMix")
@@ -97,6 +135,8 @@ class PlaybackCapture(
             current.startRecording()
             if (current.recordingState != AudioRecord.RECORDSTATE_RECORDING)
                 throw IllegalStateException("Playback AudioRecord did not start")
+            onStarted()
+            Log.i(TAG, "capture path uid=$uid mode=${if (privileged) "privileged" else "legacy"}")
             Log.i(TAG, "capture started uid=$uid 48000Hz mono float32")
             val pcm = FloatArray(4096)
             var offset = 0
@@ -117,34 +157,64 @@ class PlaybackCapture(
                 listener.onBars(bars)
                 offset = 0
             }
-        } catch (error: Throwable) {
-            val cause = if (error is InvocationTargetException && error.cause != null) error.cause!! else error
-            if (!stopped) {
-                Log.e(TAG, "capture unavailable uid=$uid", cause)
-                listener.onUnavailable(cause.javaClass.simpleName + ": " + cause.message)
-            }
         } finally {
             val current = record
             record = null
+            var released = true
             if (current != null) {
                 try {
                     current.stop()
                 } catch (ignored: IllegalStateException) {
                 }
-                current.release()
+                try {
+                    current.release()
+                } catch (error: RuntimeException) {
+                    released = false
+                    Log.e(TAG, "Cannot release audio record", error)
+                }
             }
             if (registered) {
                 try {
                     AudioManager::class.java.getMethod("unregisterAudioPolicy", policyClass).invoke(manager, policy)
                 } catch (error: ReflectiveOperationException) {
+                    released = false
                     Log.e(TAG, "Cannot unregister audio policy", error)
                 }
             }
+            if (released) onReleased()
             Log.i(TAG, "capture stopped uid=$uid")
         }
     }
 
-    private companion object {
-        const val TAG = "Hyperwave"
+    private fun captureCause(error: Throwable): Throwable =
+            if (error is InvocationTargetException && error.cause != null) error.cause!! else error
+
+    companion object {
+        internal const val RULE_TAG = "dev.hyperwave.capture.48k.v1"
+        private const val TAG = "Hyperwave"
+    }
+}
+
+/** Each attempt owns its cleanup; fallback starts only after the first attempt unwinds. */
+internal fun runCaptureWithFallback(
+        isStopped: () -> Boolean,
+        canRetry: () -> Boolean,
+        capture: (privileged: Boolean) -> Unit,
+        onFallback: (Exception) -> Unit,
+) {
+    if (isStopped()) return
+    try {
+        capture(true)
+    } catch (first: Exception) {
+        if (isStopped()) return
+        if (!canRetry()) throw first
+        onFallback(first)
+        if (isStopped()) return
+        try {
+            capture(false)
+        } catch (second: Exception) {
+            if (second !== first) second.addSuppressed(first)
+            throw second
+        }
     }
 }

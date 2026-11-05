@@ -24,6 +24,7 @@ import dev.hyperwave.ui.WaveformView
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
+import io.github.libxposed.api.XposedModuleInterface.SystemServerStartingParam
 import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.util.Collections
@@ -34,20 +35,37 @@ import java.util.concurrent.Executors
 class HyperwaveModule : XposedModule() {
     private val installed: MutableSet<ClassLoader> = Collections.newSetFromMap(WeakHashMap())
     private val entries = WeakHashMap<Any, Entry>()
-    private val main = Handler(Looper.getMainLooper())
-    private val background: ExecutorService = Executors.newSingleThreadExecutor()
+    private val main by lazy { Handler(Looper.getMainLooper()) }
+    private val background: ExecutorService by lazy { Executors.newSingleThreadExecutor() }
     private var style = Style.HYPEROS
     private var settingsObserver: ContentObserver? = null
     private var nativeReady = false
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
+        if (param.isSystemServer) {
+            log(Log.INFO, TAG, "loaded API $apiVersion in system_server")
+            return
+        }
         if (SYSTEM_UI != param.processName) return
+        try {
+            FullRateCaptureHooks(this, false).install(javaClass.classLoader!!)
+        } catch (error: Throwable) {
+            report("Full-rate capture hooks unavailable; legacy capture remains available", error)
+        }
         try {
             NativeDsp.load(moduleApplicationInfo.nativeLibraryDir)
             nativeReady = true
             log(Log.INFO, TAG, "loaded API $apiVersion in ${param.processName}")
         } catch (error: Throwable) {
             report("Rust library failed to load; original island retained", error)
+        }
+    }
+
+    override fun onSystemServerStarting(param: SystemServerStartingParam) {
+        try {
+            FullRateCaptureHooks(this, true).install(param.classLoader)
+        } catch (error: Throwable) {
+            report("Full-rate system capture unavailable; retaining format restrictions", error)
         }
     }
 

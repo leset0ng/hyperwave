@@ -2,6 +2,9 @@ package dev.hyperwave.ui
 
 import android.app.Activity
 import android.app.Instrumentation
+import android.content.Intent
+import android.media.AudioAttributes
+import android.media.AudioFormat
 import android.graphics.Bitmap
 import android.graphics.RectF
 import android.graphics.drawable.BitmapDrawable
@@ -9,20 +12,31 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
 import dev.hyperwave.audio.NativeDsp
+import dev.hyperwave.TestAudioService
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.Random
 import java.util.concurrent.atomic.AtomicReference
 
 /** Dependency-free device regression and paired, warmed performance measurements. */
 class PerformanceInstrumentation : Instrumentation() {
     private val results = Bundle()
+    private var captureArguments: Bundle? = null
 
     override fun onCreate(arguments: Bundle?) {
         super.onCreate(arguments)
+        captureArguments = arguments?.takeIf { it.containsKey("capture_policy") }
         start()
     }
 
     override fun onStart() {
         try {
+            val capture = captureArguments
+            if (capture != null) {
+                runCaptureSource(capture)
+                finish(Activity.RESULT_OK, results)
+                return
+            }
             NativeDsp.load(targetContext.applicationInfo.nativeLibraryDir)
             verifyNativeBounds()
             verifyArtwork()
@@ -36,6 +50,36 @@ class PerformanceInstrumentation : Instrumentation() {
         } catch (error: Throwable) {
             results.putString("failure", Log.getStackTraceString(error))
             finish(Activity.RESULT_CANCELED, results)
+        }
+    }
+
+    private fun runCaptureSource(arguments: Bundle) {
+        // An unrelated process must still reject full-rate privileged formats.
+        val mixClass = Class.forName("android.media.audiopolicy.AudioMix")
+        val format = AudioFormat.Builder().setSampleRate(48000)
+                .setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
+                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build()
+        val formatLimit = try {
+            val error = mixClass.getMethod("canBeUsedForPrivilegedMediaCapture", AudioFormat::class.java)
+                    .invoke(null, format)
+            require(error is String, "format restriction escaped into an unrelated process")
+            "PASS: format rejected"
+        } catch (expected: NoSuchMethodException) {
+            "Hidden API inaccessible; direct format check not exercised"
+        }
+        val policy = arguments.getString("capture_policy")!!.toInt()
+        require(policy in AudioAttributes.ALLOW_CAPTURE_BY_ALL..AudioAttributes.ALLOW_CAPTURE_BY_NONE,
+                "invalid capture policy")
+        val intent = Intent(targetContext, TestAudioService::class.java)
+                .setAction(TestAudioService.PLAY).putExtra("capture_policy", policy)
+                .putExtra("test_frequency", arguments.getString("test_frequency", "0").toDouble())
+        try {
+            targetContext.startForegroundService(intent)
+            CountDownLatch(1).await(27, TimeUnit.SECONDS)
+            results.putString("capture_source", "policy=$policy; inspect SystemUI PCM logs for capture result")
+            results.putString("unrelated_process_format_limit", formatLimit)
+        } finally {
+            targetContext.stopService(intent)
         }
     }
 
