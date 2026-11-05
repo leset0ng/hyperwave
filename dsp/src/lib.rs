@@ -36,6 +36,11 @@ impl Default for Analyzer {
 
 impl Analyzer {
     pub fn analyze(&mut self, pcm: &[f32]) -> Result<[f32; BANDS], &'static str> {
+        self.analyze_bins(pcm, EDGES[BANDS])
+    }
+
+    // Production only consumes bins 0..852; full spectra remain available to reference tests.
+    fn analyze_bins(&mut self, pcm: &[f32], bins: usize) -> Result<[f32; BANDS], &'static str> {
         if pcm.len() != FRAMES {
             return Err("Expected exactly 4096 mono frames at 48000 Hz");
         }
@@ -46,7 +51,7 @@ impl Analyzer {
         self.fft.process_with_scratch(&mut self.buffer, &mut self.scratch);
         // vDSP real-forward output is twice a conventional unscaled FFT.
         // Its 2/2048 postscale therefore becomes 4/2048 here.
-        for (magnitude, bin) in self.magnitudes.iter_mut().zip(&self.buffer) {
+        for (magnitude, bin) in self.magnitudes[..bins].iter_mut().zip(&self.buffer) {
             *magnitude = bin.norm() * (4.0 / WINDOW as f32);
         }
         // vDSP packs DC and Nyquist into the real/imaginary parts of bin zero.
@@ -115,6 +120,8 @@ mod tests {
             let pcm: Vec<f32> = vector["pcm_float32"].as_array().unwrap().iter()
                 .map(|v| v.as_f64().unwrap() as f32).collect();
             let actual = analyzer.analyze(&pcm).unwrap();
+            let full_spectrum = analyzer.analyze_bins(&pcm, WINDOW).unwrap();
+            assert_eq!(actual, full_spectrum, "{name}: production and full-spectrum bands differ");
             for (i, value) in actual.iter().enumerate() {
                 let expected = vector["six_bars_reference_float32"][i].as_f64().unwrap() as f32;
                 assert!((value - expected).abs() < 0.0001, "{name} band {i}: {value} != {expected}");
@@ -138,6 +145,46 @@ mod tests {
         let mut analyzer = Analyzer::default();
         assert!(analyzer.analyze(&[0.0; WINDOW]).is_err());
         assert_eq!(analyzer.analyze(&[f32::NAN; FRAMES]).unwrap(), [0.0; BANDS]);
+    }
+
+    #[test]
+    fn production_bands_do_not_depend_on_previous_high_bins() {
+        let mut analyzer = Analyzer::default();
+        analyzer.magnitudes.fill(f32::NAN);
+        let mut pcm = [0.0; FRAMES];
+        for (i, sample) in pcm.iter_mut().enumerate() {
+            *sample = (std::f32::consts::TAU * 900.0 * i as f32 / 48000.0).sin() * 0.05;
+        }
+        let actual = analyzer.analyze(&pcm).unwrap();
+        assert!(actual.iter().all(|value| value.is_finite()));
+        assert!(analyzer.magnitudes[EDGES[BANDS]..].iter().all(|value| value.is_nan()));
+        assert_eq!(actual, analyzer.analyze_bins(&pcm, WINDOW).unwrap());
+    }
+
+    #[test]
+    #[ignore = "manual release-mode paired timing, not a performance assertion"]
+    fn benchmark_required_bins() {
+        use std::{hint::black_box, time::Instant};
+        let pcm: Vec<f32> = (0..FRAMES).map(|i| (i as f32 * 0.1178).sin() * 0.05).collect();
+        let mut analyzer = Analyzer::default();
+        let iterations = 4000;
+        let mut full = Vec::new();
+        let mut required = Vec::new();
+        for round in 0..13 {
+            for bins in if round % 2 == 0 { [WINDOW, EDGES[BANDS]] } else { [EDGES[BANDS], WINDOW] } {
+                let started = Instant::now();
+                for _ in 0..iterations {
+                    black_box(analyzer.analyze_bins(black_box(&pcm), black_box(bins)).unwrap());
+                }
+                if round >= 2 {
+                    let elapsed = started.elapsed().as_secs_f64() * 1e6 / iterations as f64;
+                    if bins == WINDOW { full.push(elapsed); } else { required.push(elapsed); }
+                }
+            }
+        }
+        full.sort_by(f64::total_cmp);
+        required.sort_by(f64::total_cmp);
+        println!("DSP median us/block: full={}, required={}, speedup={}", full[5], required[5], full[5] / required[5]);
     }
 
     #[test]
