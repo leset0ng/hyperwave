@@ -24,6 +24,7 @@ internal class ArtworkFlipHooks(
     private val entries = WeakHashMap<Any, Entry>()
     private val imageGenerations = WeakHashMap<Icon, Long>()
     private var nextImageGeneration = 0L
+    private var metadataController: MediaController? = null
     var enabled = AppearanceSettings.DEFAULT_ARTWORK_FLIP
         private set
 
@@ -52,7 +53,7 @@ internal class ArtworkFlipHooks(
                     if (context != null && token != null) {
                         // Metadata IDs distinguish tracks with identical titles when the player supplies one.
                         try {
-                            val metadata = MediaController(context, token).metadata
+                            val metadata = controller(context, token).metadata
                             seed.putString("media_id", metadata?.getString(MediaMetadata.METADATA_KEY_MEDIA_ID))
                         } catch (ignored: RuntimeException) {
                             // Song/artist/session still provide stable identity during bitmap refreshes.
@@ -110,7 +111,11 @@ internal class ArtworkFlipHooks(
             // The native bind already selected another icon; do not resurrect the old artwork.
             remove(holder, false)
         } else {
-            entry.view?.layoutParams = FrameLayout.LayoutParams(entry.original.layoutParams as FrameLayout.LayoutParams)
+            val view = entry.view ?: return
+            val params = entry.original.layoutParams as FrameLayout.LayoutParams
+            if (!sameAbsoluteLayout(view.layoutParams as FrameLayout.LayoutParams, params)) {
+                view.layoutParams = FrameLayout.LayoutParams(params)
+            }
         }
     }
 
@@ -134,6 +139,7 @@ internal class ArtworkFlipHooks(
 
     fun clear() {
         entries.keys.toList().forEach { remove(it) }
+        synchronized(this) { metadataController = null }
     }
 
     fun restore(rows: List<*>) {
@@ -215,6 +221,13 @@ internal class ArtworkFlipHooks(
     }
 
     @Synchronized
+    private fun controller(context: Context, token: MediaSession.Token): MediaController {
+        val current = metadataController
+        if (current != null && current.sessionToken == token) return current
+        return MediaController(context, token).also { metadataController = it }
+    }
+
+    @Synchronized
     private fun imageGeneration(icon: Icon): Long =
             imageGenerations.getOrPut(icon) { ++nextImageGeneration }
 
@@ -229,6 +242,14 @@ internal class ArtworkFlipHooks(
 
     internal companion object {
         private const val SEED = "io.github.leset0ng.hyperwave.artwork_seed"
+
+        // Relative margins retain hidden unresolved state; keep their original copy path.
+        internal fun sameAbsoluteLayout(a: FrameLayout.LayoutParams, b: FrameLayout.LayoutParams): Boolean =
+                !a.isMarginRelative && !b.isMarginRelative &&
+                a.width == b.width && a.height == b.height && a.gravity == b.gravity &&
+                a.leftMargin == b.leftMargin && a.topMargin == b.topMargin &&
+                a.rightMargin == b.rightMargin && a.bottomMargin == b.bottomMargin &&
+                a.layoutDirection == b.layoutDirection
 
         internal fun delivery(previousSeed: Any?, previousImage: Any?, seed: Any?, image: Any?): Delivery {
             if (image == null) return if (previousImage != null && seed != null && previousSeed != seed)

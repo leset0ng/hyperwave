@@ -32,7 +32,7 @@ internal object HyperOsFallback {
 
     fun sample(elapsedMillis: Long, levels: FloatArray, gradientStart: FloatArray, gradientEnd: FloatArray) {
         val frame = ((elapsedMillis * 0.06) % 49.99).toFloat()
-        for (bar in 0 until 5) {
+        for (bar in 0 until 4) {
             val times = TIMES[bar]
             var i = 0
             while (i < times.size - 2 && frame > times[i + 1]) i++
@@ -52,6 +52,10 @@ internal object HyperOsFallback {
             if ((bar == 1 || bar == 4) && i == times.size - 2) end -= 0.001f * gradientProgress
             gradientEnd[bar] = 3 * end
         }
+        // The second and fifth tracks have identical height and gradient trajectories.
+        levels[4] = levels[1]
+        gradientStart[4] = gradientStart[1]
+        gradientEnd[4] = gradientEnd[1]
         levels[5] = 0f
     }
 

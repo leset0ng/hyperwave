@@ -111,24 +111,23 @@ class WaveformView(context: Context) : View(context), Choreographer.FrameCallbac
     }
 
     fun configure(uid: Int, isPlaying: Boolean) {
-        val changed = sourceUid != uid || playing != isPlaying
-        if (changed) {
-            val now = SystemClock.uptimeMillis()
-            refreshShown(now)
-            stopCapture()
-            if (sourceUid != uid) values.fill(0f)
-            sourceUid = uid
-            playing = isPlaying
-            unavailable = false
-            reportedLive = false
-            calculate(if (playing) values else silence, false, geometry)
-            motion.transition(geometry, now, if (playing) 80L else 900L)
-            reconcileCapture()
-        }
+        if (sourceUid == uid && playing == isPlaying) return
+        val now = SystemClock.uptimeMillis()
+        refreshShown(now)
+        stopCapture()
+        if (sourceUid != uid) values.fill(0f)
+        sourceUid = uid
+        playing = isPlaying
+        unavailable = false
+        reportedLive = false
+        calculate(if (playing) values else silence, false, geometry)
+        motion.transition(geometry, now, if (playing) 80L else 900L)
+        reconcileCapture()
         invalidate()
     }
 
     fun setHostVisible(visible: Boolean) {
+        if (hostVisible == visible) return
         hostVisible = visible
         if (visible) reconcileCapture() else stopCapture()
         invalidate()

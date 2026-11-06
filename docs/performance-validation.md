@@ -71,3 +71,28 @@ Device component checks passed exact backdrop pixel comparisons against `Referen
 | 1024x1024 source | 3538.458 us | 1905.334 us | 1.86x |
 
 The artwork flip runner also passed 23 deterministic hardware pixel comparisons against a test-only copy of the original renderer. Cases include translucent patterned bitmaps, three aspect ratios, rotation, partial opacity, blur and glow, reuse across effect changes, in-place bitmap changes and changing non-cached drawables. Every compared pixel matched exactly. Existing latest-image, rounded-corner and hide/detach lifecycle checks also passed. The models are frozen for these pixel comparisons; animation evolution is covered by JVM model tests. Dynamic changes to the system animator scale and a live injected SystemUI session were not exercised by these tests.
+
+## Unchanged host updates and exact fallback reuse
+
+- `WaveformView.configure()` returns when both UID and playback state match. Waveform and flipping artwork visibility setters return when host visibility matches. Actual configuration/visibility changes retain the previous transition, capture reconciliation and invalidation paths; parent/window visibility and attachment callbacks retain their separate lifecycle handling.
+- HyperOS fallback evaluates tracks 0 through 3, then copies track 1's level and gradient endpoints to the identical track 4. Every arithmetic operation of the retained tracks, easing iteration count, timing and output format is unchanged. This removes two 18-iteration Bezier solves per sample (20% of this helper's solver calls, not 20% of total CPU).
+
+The same temporary 22dp production-View probe used in the read-only review delivered 60 unchanged `configure(-1, true)` calls through a main-thread Handler after settling. The review baseline submitted 120 window frame callbacks in 5.17 seconds; the optimized version submitted **0** in 8.67 seconds. Idle and empty-main-post controls both submitted **0** (9.30 and 9.68 seconds). Emulator scheduling extended the later run; these observations count redundant window frame callbacks and do not establish host bind frequency, energy savings or a frame-time speedup. No AudioRecord was started; the temporary probe was uninstalled after measurement.
+
+The `waveform_lifecycle` device runner checks all three appearances for unchanged pause/live configuration, unchanged visible/hidden notifications, transition continuity, hide/show, detach/reattach, parent visibility restoration, paused geometry endpoints, and independent palette/artwork invalidation. Its settled live state is injected to avoid privileged recording services. The fallback JVM differential test compares all 16 scalar outputs by raw float bits against the frozen original implementation over 24,386 elapsed-time inputs, including full cycles, segment boundaries, wrap points, large timestamps and deterministic random values.
+
+```sh
+adb -s emulator-5580 shell am instrument -w -e artwork_hooks true \
+  io.github.leset0ng.hyperwave.test/io.github.leset0ng.hyperwave.ui.PerformanceInstrumentation
+adb -s emulator-5580 shell am instrument -w -e waveform_lifecycle true \
+  io.github.leset0ng.hyperwave.test/io.github.leset0ng.hyperwave.ui.PerformanceInstrumentation
+adb -s emulator-5580 shell am instrument -w -e artwork_flip true \
+  io.github.leset0ng.hyperwave.test/io.github.leset0ng.hyperwave.ui.PerformanceInstrumentation
+```
+
+- Artwork metadata preparation retains its original event-time snapshot, including while flipping is disabled. A complete disabled-state bypass was not applied: resolving a media ID only when enabling could associate an older delivered image with the next track's metadata. Instead, one `MediaController` is retained for the most recent equivalent session token, with synchronized replacement and retirement. Every event still calls `getMetadata()`; metadata values are not cached and no controller callbacks are registered. The device test uses actual `MediaSession` objects to check fresh IDs for identical title/artist, equivalent parceled tokens, session switching, disabled/re-enabled operation, concurrent access and retirement.
+- Artwork `onBound()` keeps its current LayoutParams when absolute size, gravity, all four margins and layout direction match. Either side having relative margins retains the original copy/assignment path because their hidden unresolved margin state cannot be compared through public getters alone. Device checks cover changed absolute fields, RTL/relative margins, unchanged bind object identity and actual changed bind propagation.
+
+The libxposed API is included only in the test APK to construct an inert `ReloadableHooks` for these checks; no framework hooks are installed. These tests do not execute the injected metadata hook or validate native host bind frequency. Package UID and reflection lookup caches were left out because their measured benefit is still unknown and they require additional invalidation/lifetime handling.
+
+Validation for this follow-up passed: 69 JVM tests (zero skipped/failures/errors), debug APK/test APK assembly, Android lint, the three-style waveform lifecycle runner, actual-session/artwork-bind checks, the 23 deterministic hardware flip pixel comparisons and latest-image/corner/hide/detach checks, plus the existing backdrop/JNI/corner/concurrent-audio component runner. The repeated visible/hidden artwork notifications also remained clean without requesting drawing after settling. No Rust production code changed. All device validation used the HyperOS arm64 emulator's application test process; a live SystemUI injection and real-device power/latency measurement remain unverified.

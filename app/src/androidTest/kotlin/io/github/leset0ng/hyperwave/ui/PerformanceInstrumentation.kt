@@ -15,6 +15,7 @@ import android.os.SystemClock
 import android.util.Log
 import io.github.leset0ng.hyperwave.audio.NativeDsp
 import io.github.leset0ng.hyperwave.audio.NativeReloadCheck
+import io.github.leset0ng.hyperwave.module.ArtworkHooksDeviceCheck
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.Random
@@ -26,17 +27,33 @@ class PerformanceInstrumentation : Instrumentation() {
     private var captureArguments: Bundle? = null
     private var nativeReload = false
     private var artworkFlip = false
+    private var waveformLifecycle = false
+    private var artworkHooks = false
 
     override fun onCreate(arguments: Bundle?) {
         super.onCreate(arguments)
         captureArguments = arguments?.takeIf { it.containsKey("capture_policy") }
         nativeReload = arguments?.getString("native_reload") == "true"
         artworkFlip = arguments?.getString("artwork_flip") == "true"
+        waveformLifecycle = arguments?.getString("waveform_lifecycle") == "true"
+        artworkHooks = arguments?.getString("artwork_hooks") == "true"
         start()
     }
 
     override fun onStart() {
         try {
+            if (artworkHooks) {
+                ArtworkHooksDeviceCheck.verify(this)
+                results.putString("checks", "PASS: fresh session metadata, token reuse/switch, disabled/re-enabled identity, concurrent cache, retirement and layout equality")
+                finish(Activity.RESULT_OK, results)
+                return
+            }
+            if (waveformLifecycle) {
+                WaveformDeviceCheck.verify(this)
+                results.putString("checks", "PASS: three waveform styles, unchanged host updates, active transition, hide/show, detach, palette and artwork")
+                finish(Activity.RESULT_OK, results)
+                return
+            }
             if (artworkFlip) {
                 ArtworkFlipDeviceCheck.verify(this)
                 results.putString("checks", "PASS: artwork flip hardware reveal, latest image, host corners, hide/detach lifecycle")

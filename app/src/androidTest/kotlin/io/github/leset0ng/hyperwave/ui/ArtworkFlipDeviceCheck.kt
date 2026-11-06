@@ -93,7 +93,20 @@ internal object ArtworkFlipDeviceCheck {
                     "hidden or detached artwork did not finish at latest image"
                 }
             } finally { restored.recycle() }
-            instrumentation.runOnMainSync { view.dispose() }
+            frames(instrumentation, 100)
+            instrumentation.runOnMainSync {
+                check(!view.isDirty) { "restored artwork did not settle" }
+                repeat(60) { view.setHostVisible(true) }
+                check(!view.isDirty) { "unchanged visible artwork requested drawing" }
+                view.setHostVisible(false)
+            }
+            frames(instrumentation, 100)
+            instrumentation.runOnMainSync {
+                check(!view.isDirty) { "hidden artwork did not settle" }
+                repeat(60) { view.setHostVisible(false) }
+                check(!view.isDirty) { "unchanged hidden artwork requested drawing" }
+                view.dispose()
+            }
             verifyPixels(instrumentation, activity, stage)
         } finally {
             instrumentation.runOnMainSync {

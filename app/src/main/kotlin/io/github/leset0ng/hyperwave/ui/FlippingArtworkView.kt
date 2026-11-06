@@ -64,6 +64,7 @@ internal class FlippingArtworkView(private val original: ImageView) : View(origi
     }
 
     fun setHostVisible(visible: Boolean) {
+        if (hostVisible == visible) return
         hostVisible = visible
         if (!visible) settle()
         else { invalidate(); schedule() }
