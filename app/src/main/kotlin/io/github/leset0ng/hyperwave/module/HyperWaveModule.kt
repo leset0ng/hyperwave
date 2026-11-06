@@ -1,5 +1,6 @@
 package io.github.leset0ng.hyperwave.module
 
+import android.app.Application
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
@@ -53,6 +54,7 @@ class HyperWaveModule : XposedModule() {
     private var settingsObserver: ContentObserver? = null
     private var settingsContext: Context? = null
     private var nativeReady = false
+    private var pendingReloadState: Map<String, Any>? = null
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         if (param.isSystemServer) {
@@ -527,7 +529,12 @@ class HyperWaveModule : XposedModule() {
     }
 
     override fun onHotReloaded(param: HotReloadedParam) {
-        val state = param.savedInstanceState as? Map<*, *> ?: emptyMap<Any, Any>()
+        val state = HashMap<String, Any>()
+        (param.savedInstanceState as? Map<*, *>)?.forEach { (key, value) ->
+            if (key is String && value != null && key != "context") state[key] = value
+        }
+        // Keep the incoming handoff intact until initialization succeeds, including across retries.
+        pendingReloadState = state
         hooks.adopt(param.oldHookHandles)
         try {
             if (param.isSystemServer) {
@@ -535,16 +542,18 @@ class HyperWaveModule : XposedModule() {
                         ?: error("Missing system_server ClassLoader")
                 check(installServer(loader)) { "System capture hook restoration failed" }
             } else if (param.processName == SYSTEM_UI) {
-                val context = state["context"] as? Context ?: currentApplication()
-                NativeDsp.loadForReload(context, moduleApplicationInfo.nativeLibraryDir)
+                // Island contexts can belong to the plugin UID, even after applicationContext.
+                val application = currentApplication()
+                val host = state["hostLoader"] as? ClassLoader ?: application.classLoader
+                hostLoader = host
+                state["hostLoader"] = host
+                NativeDsp.loadForReload(application, moduleApplicationInfo.nativeLibraryDir)
                 nativeReady = true
                 try {
                     FullRateCaptureHooks(this, hooks, false).install(javaClass.classLoader!!)
                 } catch (error: Throwable) {
                     report("Full-rate capture hooks unavailable after reload; legacy capture remains available", error)
                 }
-                val host = state["hostLoader"] as? ClassLoader
-                        ?: error("Missing SystemUI ClassLoader")
                 check(installHost(host)) { "SystemUI hook restoration failed" }
                 (state["plugins"] as? List<*>)?.filterIsInstance<ClassLoader>()?.forEach {
                     check(installPlugin(it)) { "Plugin hook restoration failed" }
@@ -552,6 +561,7 @@ class HyperWaveModule : XposedModule() {
                 onMain { restoreEntries(state) }
             }
             log(Log.INFO, TAG, "hot reload complete in ${param.processName}")
+            pendingReloadState = null
         } finally {
             // Hooks removed from the new version must not keep old code reachable.
             hooks.finishAdoption()
@@ -561,15 +571,19 @@ class HyperWaveModule : XposedModule() {
     /** Only framework/host objects and bootstrap collections cross generations. */
     @Synchronized
     private fun saveReloadState(): Map<String, Any> {
-        val state = HashMap<String, Any>()
+        val pending = pendingReloadState
+        val state = HashMap(pending ?: emptyMap())
         hostLoader?.let { state["hostLoader"] = it }
         serverLoader?.let { state["serverLoader"] = it }
-        settingsContext?.let { state["context"] = it }
-        state["plugins"] = ArrayList(installed)
-        state["style"] = style.value
-        state["height"] = heightPercent
-        state["artworkFlip"] = artworkFlips.enabled
-        state["artworkHolders"] = artworkFlips.snapshot()
+        val plugins = ArrayList((state["plugins"] as? List<*>)?.filterIsInstance<ClassLoader>() ?: emptyList())
+        for (loader in installed) if (plugins.none { it === loader }) plugins.add(loader)
+        state["plugins"] = plugins
+        if (pending == null || settingsObserver != null) {
+            state["style"] = style.value
+            state["height"] = heightPercent
+            state["artworkFlip"] = artworkFlips.enabled
+        }
+        state["artworkHolders"] = mergeReloadHolders(state["artworkHolders"], artworkFlips.snapshot())
         val holders = ArrayList<ArrayList<Any>>()
         for ((holder, entry) in entries) {
             val row = ArrayList<Any>()
@@ -580,7 +594,7 @@ class HyperWaveModule : XposedModule() {
             row.add(entry.hostVisible)
             holders.add(row)
         }
-        state["holders"] = holders
+        state["holders"] = mergeReloadHolders(state["holders"], holders)
         return state
     }
 
@@ -606,9 +620,9 @@ class HyperWaveModule : XposedModule() {
         artworkFlips.restore(state["artworkHolders"] as? List<*> ?: emptyList<Any>())
     }
 
-    private fun currentApplication(): Context =
+    private fun currentApplication(): Application =
             Class.forName("android.app.ActivityThread").getMethod("currentApplication")
-                    .invoke(null) as? Context ?: error("SystemUI application is not ready")
+                    .invoke(null) as? Application ?: error("SystemUI application is not ready")
 
     private fun <T> onMain(action: () -> T): T {
         if (Looper.myLooper() == Looper.getMainLooper()) return action()
@@ -676,4 +690,15 @@ class HyperWaveModule : XposedModule() {
         const val PLUGIN = "miui.systemui.plugin"
         const val HOLDER = "miui.systemui.dynamicisland.module.IslandIconViewHolder"
     }
+}
+
+/** Preserve unrestored holders while letting live rows supersede their incoming snapshots. */
+internal fun mergeReloadHolders(saved: Any?, current: List<List<Any>>): ArrayList<List<*>> {
+    val rows = ArrayList<List<*>>()
+    (saved as? List<*>)?.filterIsInstance<List<*>>()?.filterTo(rows) { it.firstOrNull() != null }
+    for (row in current) {
+        rows.removeAll { it[0] === row[0] }
+        rows.add(row)
+    }
+    return rows
 }

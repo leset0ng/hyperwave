@@ -1,7 +1,8 @@
 package io.github.leset0ng.hyperwave.audio
 
-import android.content.Context
+import android.app.Application
 import android.media.AudioRecord
+import android.os.Process
 import java.io.File
 
 object NativeDsp {
@@ -18,10 +19,17 @@ object NativeDsp {
 
     /** ART associates a library path with one ClassLoader; every generation needs a real copy. */
     @Synchronized
-    fun loadForReload(context: Context, nativeLibraryDir: String) {
+    fun loadForReload(application: Application, nativeLibraryDir: String) {
         if (loaded) return
-        val directory = File(context.createDeviceProtectedStorageContext().codeCacheDir, "hyperwave-native")
-        check(directory.isDirectory || directory.mkdirs()) { "Cannot create native reload directory" }
+        check(application.applicationInfo.uid == Process.myUid()) {
+            "Native reload requires the host application; package=${application.packageName}, " +
+                    "uid=${application.applicationInfo.uid}, processUid=${Process.myUid()}"
+        }
+        val directory = File(application.createDeviceProtectedStorageContext().codeCacheDir, "hyperwave-native")
+        check(directory.isDirectory || directory.mkdirs()) {
+            "Cannot create native reload directory: ${directory.absolutePath}; " +
+                    "package=${application.packageName}, processUid=${Process.myUid()}"
+        }
         val copy = File.createTempFile("libhyperwave_dsp-", ".so", directory)
         try {
             File(nativeLibraryDir, "libhyperwave_dsp.so").inputStream().use { input ->
