@@ -1,4 +1,7 @@
-plugins { id("com.android.application") }
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.plugin.compose")
+}
 
 android {
     namespace = "io.github.leset0ng.hyperwave"
@@ -13,9 +16,10 @@ android {
         ndk { abiFilters += "arm64-v8a" }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
+    buildFeatures { compose = true }
     signingConfigs {
         val keystorePath = providers.environmentVariable("HYPERWAVE_KEYSTORE_PATH").orNull
         if (keystorePath != null) {
@@ -48,6 +52,9 @@ dependencies {
     compileOnly("io.github.libxposed:api:102.0.0")
     testImplementation("io.github.libxposed:api:102.0.0")
     testImplementation("junit:junit:4.13.2")
+    implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("io.github.neoruaa.glasmio:glasmio-scaffold:0.1.2")
+    implementation("io.github.neoruaa.glasmio:glasmio-preference:0.1.2")
 }
 
 val buildRust by tasks.registering(Exec::class) {
