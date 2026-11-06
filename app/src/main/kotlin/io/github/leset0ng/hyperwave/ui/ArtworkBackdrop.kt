@@ -18,6 +18,26 @@ object ArtworkBackdrop {
 
     fun prepare(drawable: Drawable, logicalSize: Float): Bitmap? {
         require(logicalSize > 0 && logicalSize.isFinite()) { "Expected a finite positive logical size" }
+        return prepareBase(drawable)?.render(logicalSize)
+    }
+
+    /** Immutable size-independent pixels, scoped by the caller to the current artwork. */
+    class Base internal constructor(private val pixels: IntArray) {
+        fun render(logicalSize: Float): Bitmap {
+            require(logicalSize > 0 && logicalSize.isFinite()) { "Expected a finite positive logical size" }
+            val blurred = PIXEL_BUFFERS.get() ?: IntArray(64 * 1024)
+            pixels.copyInto(blurred)
+            val radius = minOf(SIZE, maxOf(1, Math.round(6f / logicalSize * SIZE)))
+            if (!NativeDsp.blurArtwork(blurred, radius)) {
+                throw IllegalStateException("Rust rejected the artwork blur")
+            }
+            return Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888).apply {
+                setPixels(blurred, 0, SIZE, 0, 0, SIZE, SIZE)
+            }
+        }
+    }
+
+    fun prepareBase(drawable: Drawable): Base? {
         var source: Bitmap?
         var owned: Boolean
         if (drawable is BitmapDrawable) {
@@ -42,13 +62,13 @@ object ArtworkBackdrop {
         }
         if (source == null) return null
         try {
-            return prepare(source, logicalSize)
+            return prepareBase(source)
         } finally {
             if (owned) source.recycle()
         }
     }
 
-    private fun prepare(source: Bitmap, logicalSize: Float): Bitmap {
+    private fun prepareBase(source: Bitmap): Base {
         var pixels = PIXEL_BUFFERS.get() ?: IntArray(64 * 1024)
         if (pixels.size < source.width) {
             pixels = IntArray(source.width)
@@ -79,10 +99,9 @@ object ArtworkBackdrop {
         canvas.drawBitmap(source, Rect(left, top, left + side, top + side), Rect(0, 0, SIZE, SIZE), paint)
         canvas.drawColor(Color.argb(Math.round(255 * darkening), 0, 0, 0))
         canvas.drawColor(Color.argb(Math.round(255 * lightening), 255, 255, 255))
-        result.getPixels(pixels, 0, SIZE, 0, 0, SIZE, SIZE)
-        val radius = minOf(SIZE, maxOf(1, Math.round(6f / logicalSize * SIZE)))
-        if (!NativeDsp.blurArtwork(pixels, radius)) throw IllegalStateException("Rust rejected the artwork blur")
-        result.setPixels(pixels, 0, SIZE, 0, 0, SIZE, SIZE)
-        return result
+        val base = IntArray(SIZE * SIZE)
+        result.getPixels(base, 0, SIZE, 0, 0, SIZE, SIZE)
+        result.recycle()
+        return Base(base)
     }
 }

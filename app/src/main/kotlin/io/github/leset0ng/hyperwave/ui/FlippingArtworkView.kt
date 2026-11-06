@@ -13,9 +13,9 @@ import android.graphics.RectF
 import android.graphics.RenderEffect
 import android.graphics.RenderNode
 import android.graphics.Shader
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.os.SystemClock
-import android.provider.Settings
 import android.view.Choreographer
 import android.view.View
 import android.widget.ImageView
@@ -34,6 +34,9 @@ internal class FlippingArtworkView(private val original: ImageView) : View(origi
     private val outlineRect = Rect()
     private val oldBounds = Rect()
     private val content = RectF()
+    private val recordedBounds = Rect()
+    private var recordedDrawable: BitmapDrawable? = null
+    private var recordedGeneration = 0
     private val glow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         blendMode = BlendMode.PLUS
@@ -70,6 +73,8 @@ internal class FlippingArtworkView(private val original: ImageView) : View(origi
         cancelFrame()
         model.update(latest, seed, ratio(latest), now(), animate = false)
         node.setRenderEffect(null)
+        node.discardDisplayList()
+        recordedDrawable = null
         invalidate()
     }
 
@@ -121,8 +126,7 @@ internal class FlippingArtworkView(private val original: ImageView) : View(origi
 
     private fun now(): Double {
         val wall = SystemClock.uptimeMillis()
-        val scale = Settings.Global.getFloat(context.contentResolver,
-                Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
+        val scale = ValueAnimator.getDurationScale()
         clock += (wall - wallTime).coerceAtLeast(0L) / 1000.0 /
                 (if (scale.isFinite() && scale > 0f) scale else 1f)
         wallTime = wall
@@ -167,11 +171,28 @@ internal class FlippingArtworkView(private val original: ImageView) : View(origi
         val layer = canvas.saveLayerAlpha(content, (model.opacity * 255).toInt())
         val blur = (model.reveal * 15f * resources.displayMetrics.density).toFloat()
         if (blur > 0.01f && canvas.isHardwareAccelerated) {
-            node.setPosition(0, 0, width, height)
+            val resized = node.setPosition(0, 0, width, height)
             node.setRenderEffect(RenderEffect.createBlurEffect(blur, blur, Shader.TileMode.CLAMP))
-            val recording = node.beginRecording()
-            drawImage(recording, drawable)
-            node.endRecording()
+            // BitmapDrawable records a stable bitmap draw. Unknown/animated drawables
+            // must keep drawing each frame, since their output may change independently.
+            val bitmap = (drawable as? BitmapDrawable)?.takeIf {
+                it.javaClass == BitmapDrawable::class.java
+            }
+            val generation = bitmap?.bitmap?.generationId ?: 0
+            if (bitmap == null || recordedDrawable !== bitmap || resized || !node.hasDisplayList() ||
+                    recordedGeneration != generation ||
+                    recordedBounds.left != content.left.toInt() ||
+                    recordedBounds.top != content.top.toInt() ||
+                    recordedBounds.right != content.right.toInt() ||
+                    recordedBounds.bottom != content.bottom.toInt()) {
+                val recording = node.beginRecording()
+                drawImage(recording, drawable)
+                node.endRecording()
+                recordedDrawable = bitmap
+                recordedGeneration = generation
+                recordedBounds.set(content.left.toInt(), content.top.toInt(),
+                        content.right.toInt(), content.bottom.toInt())
+            }
             canvas.drawRenderNode(node)
         } else {
             node.setRenderEffect(null)

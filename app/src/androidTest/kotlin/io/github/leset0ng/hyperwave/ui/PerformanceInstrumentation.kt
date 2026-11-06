@@ -5,8 +5,11 @@ import android.app.Instrumentation
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.RectF
 import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.Drawable
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
@@ -133,6 +136,19 @@ class PerformanceInstrumentation : Instrumentation() {
                 source.recycle()
             }
         }
+        val drawable = ColorDrawable(0x7f334455).apply { setBounds(2, 3, 12, 17) }
+        val bounds = drawable.copyBounds()
+        val raster = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+        try {
+            drawable.setBounds(0, 0, 1, 1)
+            drawable.draw(Canvas(raster))
+            drawable.bounds = bounds
+            compareSharedArtwork(drawable, BitmapDrawable(targetContext.resources, raster))
+            require(drawable.bounds == bounds, "shared preparation changed drawable bounds")
+        } finally {
+            drawable.bounds = bounds
+            raster.recycle()
+        }
     }
 
     private fun compareArtwork(source: Bitmap) {
@@ -147,6 +163,35 @@ class PerformanceInstrumentation : Instrumentation() {
                 actual?.recycle()
             }
             require(!source.isRecycled, "caller-owned bitmap was recycled")
+        }
+        compareSharedArtwork(drawable)
+        val disposable = source.copy(Bitmap.Config.ARGB_8888, true)!!
+        val base = ArtworkBackdrop.prepareBase(BitmapDrawable(targetContext.resources, disposable))!!
+        disposable.recycle()
+        val expected = ReferenceArtwork.prepare(drawable, 22f)
+        val actual = base.render(22f)
+        try {
+            require(expected.sameAs(actual), "base retained caller-owned source pixels")
+        } finally {
+            expected.recycle()
+            actual.recycle()
+        }
+    }
+
+    private fun compareSharedArtwork(drawable: Drawable, reference: Drawable = drawable) {
+        for (order in arrayOf(floatArrayOf(16f, 22f, 16f), floatArrayOf(22f, 16f, 22f))) {
+            val base = ArtworkBackdrop.prepareBase(drawable)
+            require(base != null, "shared artwork base missing")
+            for (size in order) {
+                val expected = ReferenceArtwork.prepare(reference, size)
+                val actual = base!!.render(size)
+                try {
+                    require(expected.sameAs(actual), "shared artwork pixel mismatch at size $size")
+                } finally {
+                    expected.recycle()
+                    actual.recycle()
+                }
+            }
         }
     }
 
@@ -205,6 +250,14 @@ class PerformanceInstrumentation : Instrumentation() {
                 measurePair("artwork_$size",
                         Runnable { ReferenceArtwork.prepare(drawable, 16f).recycle() },
                         Runnable { ArtworkBackdrop.prepare(drawable, 16f)?.recycle() }, 1)
+                measurePair("artwork_two_sizes_$size", Runnable {
+                    ArtworkBackdrop.prepare(drawable, 16f)!!.recycle()
+                    ArtworkBackdrop.prepare(drawable, 22f)!!.recycle()
+                }, Runnable {
+                    val base = ArtworkBackdrop.prepareBase(drawable)!!
+                    base.render(16f).recycle()
+                    base.render(22f).recycle()
+                }, 1)
             } finally {
                 source.recycle()
             }

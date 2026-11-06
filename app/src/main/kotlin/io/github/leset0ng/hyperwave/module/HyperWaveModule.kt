@@ -53,6 +53,7 @@ class HyperWaveModule : XposedModule() {
     private var heightPercent = AppearanceSettings.DEFAULT_HEIGHT_PERCENT
     private var settingsObserver: ContentObserver? = null
     private var settingsContext: Context? = null
+    private var settingsReadQueued = false
     private var nativeReady = false
     private var pendingReloadState: Map<String, Any>? = null
 
@@ -326,8 +327,14 @@ class HyperWaveModule : XposedModule() {
         }
     }
 
+    @Synchronized
     private fun readSettings(context: Context) {
+        if (hooks.paused || settingsReadQueued) return
+        settingsReadQueued = true
         inBackground {
+            // Read the latest provider state once this task reaches the worker. Requests
+            // arriving during the query can queue one follow-up, without losing the final value.
+            synchronized(this) { settingsReadQueued = false }
             try {
                 context.contentResolver.query(AppearanceSettings.URI, null, null, null, null)?.use { cursor ->
                     if (!cursor.moveToFirst()) return@inBackground
@@ -408,6 +415,7 @@ class HyperWaveModule : XposedModule() {
             entry.artworkGeneration++
             entry.preparingArtworkSize = -1
             entry.artworkBackdrops.fill(null)
+            entry.artworkBase = null
             entry.artworkPrepared.fill(false)
             showArtwork(entry, null)
         }
@@ -447,12 +455,16 @@ class HyperWaveModule : XposedModule() {
         inBackground {
             try {
                 if (hooks.paused || token != entry.artworkGeneration) return@inBackground
-                val drawable = icon.loadDrawable(context)
+                val base = entry.artworkBase ?: run {
+                    val drawable = icon.loadDrawable(context)
+                    if (hooks.paused || token != entry.artworkGeneration) return@inBackground
+                    drawable?.let { ArtworkBackdrop.prepareBase(it) }
+                }
                 if (hooks.paused || token != entry.artworkGeneration) return@inBackground
-                val backdrop = if (drawable == null) null
-                        else ArtworkBackdrop.prepare(drawable, logicalSize)
+                val backdrop = base?.render(logicalSize)
                 postUpdate {
                     if (token != entry.artworkGeneration) return@postUpdate
+                    entry.artworkBase = base
                     entry.preparingArtworkSize = -1
                     entry.artworkBackdrops[sizeIndex] = backdrop
                     entry.artworkPrepared[sizeIndex] = true
@@ -497,6 +509,7 @@ class HyperWaveModule : XposedModule() {
             }
             val retiringWorkers = synchronized(this) {
                 background = null
+                settingsReadQueued = false
                 ArrayList(workers)
             }
             retiringWorkers.forEach { it.shutdownNow() }
@@ -673,6 +686,7 @@ class HyperWaveModule : XposedModule() {
         var hostVisible = true
         val hiddenViews = java.util.IdentityHashMap<View, Int>()
         var artworkIcon: Icon? = null
+        @Volatile var artworkBase: ArtworkBackdrop.Base? = null
         var artworkBackdrops: Array<Bitmap?> = arrayOfNulls(2)
         var artworkPrepared = BooleanArray(2)
         var shownArtwork: Bitmap? = null

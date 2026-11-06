@@ -168,8 +168,7 @@ class WaveformView(context: Context) : View(context), Choreographer.FrameCallbac
                         Log.i("HyperWave", "renderer live uid=$sourceUid bars=${bars.contentToString()}")
                     }
                     calculate(values, false, geometry)
-                    motion.transition(geometry, now, 80L)
-                    scheduleFrame()
+                    if (motion.transition(geometry, now, 80L)) scheduleFrame()
                 }
             }
 

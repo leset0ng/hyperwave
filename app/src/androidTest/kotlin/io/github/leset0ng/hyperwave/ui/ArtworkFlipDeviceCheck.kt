@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.Rect
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.ColorDrawable
 import android.os.Handler
 import android.os.Looper
@@ -92,12 +93,116 @@ internal object ArtworkFlipDeviceCheck {
                     "hidden or detached artwork did not finish at latest image"
                 }
             } finally { restored.recycle() }
+            instrumentation.runOnMainSync { view.dispose() }
+            verifyPixels(instrumentation, activity, stage)
         } finally {
             instrumentation.runOnMainSync {
                 if (viewReady) view.dispose()
                 if (stageReady) (stage.parent as? ViewGroup)?.removeView(stage)
                 activity.finish()
             }
+        }
+    }
+
+    /** Compare deterministic frames against the original renderer on the same GPU. */
+    private fun verifyPixels(instrumentation: Instrumentation, activity: Activity, stage: FrameLayout) {
+        val size = (128 * activity.resources.displayMetrics.density).toInt()
+        val source = Bitmap.createBitmap(67, 83, Bitmap.Config.ARGB_8888)
+        for (y in 0 until source.height) for (x in 0 until source.width) {
+            source.setPixel(x, y, Color.argb((x * 17 + y * 11) % 256,
+                    (x * 41) % 256, (y * 29) % 256, (x * 7 + y * 13) % 256))
+        }
+        val views = ArrayList<View>()
+        try {
+            instrumentation.runOnMainSync {
+                stage.removeAllViews()
+                stage.setBackgroundColor(Color.rgb(49, 71, 93))
+                stage.layoutParams = (stage.layoutParams as FrameLayout.LayoutParams).apply {
+                    width = size * 2
+                }
+                repeat(2) { index ->
+                    val original = ImageView(activity).apply {
+                        visibility = View.INVISIBLE
+                        outlineProvider = object : ViewOutlineProvider() {
+                            override fun getOutline(view: View, outline: Outline) {
+                                outline.setRoundRect(0, 0, view.width, view.height, size * 0.13f)
+                            }
+                        }
+                    }
+                    val params = FrameLayout.LayoutParams(size, size,
+                            Gravity.LEFT or Gravity.CENTER_VERTICAL).apply { leftMargin = index * size }
+                    stage.addView(original, FrameLayout.LayoutParams(params))
+                    val renderer = if (index == 0) FlippingArtworkView(original)
+                            else ReferenceFlippingArtworkView(original)
+                    views.add(renderer)
+                    stage.addView(renderer, params)
+                }
+            }
+            frames(instrumentation, 50)
+            val models = ArrayList<Any>()
+            instrumentation.runOnMainSync {
+                for (renderer in views) {
+                    renderer.javaClass.getDeclaredField("disposed").apply { isAccessible = true }
+                            .setBoolean(renderer, true)
+                    models.add(renderer.javaClass.getDeclaredField("model").apply {
+                        isAccessible = true
+                    }.get(renderer))
+                }
+            }
+            val images = Array(2) { BitmapDrawable(activity.resources, source) }
+            fun compare(label: String, drawables: Array<out android.graphics.drawable.Drawable>,
+                        ratio: Double, angle: Double, opacity: Double, reveal: Double) {
+                instrumentation.runOnMainSync {
+                    for (index in views.indices) {
+                        val model = models[index]
+                        for ((name, value) in listOf("displayed" to drawables[index],
+                                "aspectRatio" to ratio, "angle" to angle,
+                                "opacity" to opacity, "reveal" to reveal)) {
+                            model.javaClass.getDeclaredField(name).apply { isAccessible = true }.set(model, value)
+                        }
+                        views[index].invalidate()
+                    }
+                }
+                frames(instrumentation, 35)
+                val image = capture(instrumentation, activity, stage)
+                try {
+                    val pixels = IntArray(image.width * image.height)
+                    image.getPixels(pixels, 0, image.width, 0, 0, image.width, image.height)
+                    for (y in 0 until image.height) for (x in 0 until size) {
+                        check(pixels[y * image.width + x] == pixels[y * image.width + size + x]) {
+                            "artwork pixels differ: $label at ($x, $y)"
+                        }
+                    }
+                } finally { image.recycle() }
+            }
+            for (ratio in doubleArrayOf(1.0, 0.65, 1.8)) {
+                for (angle in doubleArrayOf(0.0, 37.0)) {
+                    for (reveal in doubleArrayOf(1.0, 0.5, 0.0)) {
+                        compare("ratio=$ratio angle=$angle reveal=$reveal", images,
+                                ratio, angle, if (reveal == 0.5) 0.4 else 1.0, reveal)
+                    }
+                }
+            }
+            // Keep bounds and drawable stable across effect updates to exercise reuse.
+            compare("cache primed", images, 1.0, 20.0, 1.0, 1.0)
+            compare("cache reused", images, 1.0, 20.0, 1.0, 0.6)
+            source.eraseColor(Color.argb(91, 182, 23, 217))
+            compare("mutable bitmap", images, 1.0, 20.0, 1.0, 0.6)
+            val colors = Array(2) { ColorDrawable(Color.RED) }
+            compare("uncached drawable", colors, 1.0, -31.0, 0.5, 0.8)
+            colors.forEach { it.color = Color.BLUE }
+            compare("changed drawable", colors, 1.0, -31.0, 0.5, 0.8)
+        } finally {
+            instrumentation.runOnMainSync {
+                for (renderer in views) {
+                    when (renderer) {
+                        is FlippingArtworkView -> renderer.dispose()
+                        is ReferenceFlippingArtworkView -> renderer.dispose()
+                    }
+                }
+                stage.removeAllViews()
+            }
+            source.recycle()
         }
     }
 

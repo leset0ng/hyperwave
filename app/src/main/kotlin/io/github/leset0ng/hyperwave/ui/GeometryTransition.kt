@@ -27,13 +27,17 @@ internal class GeometryTransition(
         direct = true
     }
 
-    fun transition(geometry: FloatArray, now: Long, milliseconds: Long) {
+    fun transition(geometry: FloatArray, now: Long, milliseconds: Long): Boolean {
         evaluate(now)
+        // Only settled, exactly identical geometry is a no-op. Repeated targets during
+        // an active transition retain the existing interpolation and interruption timing.
+        if (!direct && !animating(now) && shown.contentEquals(geometry)) return false
         shown.copyInto(start, 0, 0, COMPONENTS)
         geometry.copyInto(target, 0, 0, COMPONENTS)
         started = now
         duration = milliseconds
         direct = false
+        return true
     }
 
     fun evaluate(now: Long) {
