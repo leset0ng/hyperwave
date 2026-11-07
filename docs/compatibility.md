@@ -2,12 +2,14 @@
 
 ## Validated environment
 
-| | |
-|---|---|
-| Device | `hongkong` AVD (arm64) |
-| ROM | HyperOS `OS4.0.24.0.XFRCNXM` / Android 17, API 37 |
-| Framework | LSPosed `2.2.1 (7930)`, Xposed API `102` |
-| Scopes | `com.android.systemui`, `system` (system_server) |
+| | Physical device | Emulator |
+|---|---|---|
+| Device | Xiaomi 17 Pro (`pandora`, arm64) | `hongkong` AVD (arm64) |
+| ROM | HyperOS `OS4.0.4.0.XBLCNXM` | HyperOS `OS4.0.24.0.XFRCNXM` |
+| Android | 17, API 37 | 17, API 37 |
+| Framework | LSPosed `2.2.1 (7939)` | LSPosed `2.2.1 (7930)` |
+
+Both use Xposed API `102`, scoped to `com.android.systemui` and `system` (system_server).
 
 Other HyperOS versions may use different class names, templates and audio policies and are untested.
 
