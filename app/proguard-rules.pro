@@ -3,6 +3,9 @@
 # resolves the overridden callback methods reflectively.
 -keep class io.github.leset0ng.hyperwave.module.** { *; }
 
+# The Rust capture loop resolves these callback methods by name through JNI.
+-keep interface io.github.leset0ng.hyperwave.audio.NativeDsp$CaptureCallback { *; }
+
 # Provided by the framework at runtime, absent from the release classpath.
 -dontwarn io.github.libxposed.api.**
 
